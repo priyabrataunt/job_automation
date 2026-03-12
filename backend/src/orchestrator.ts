@@ -1,6 +1,33 @@
 import db from './db/database';
 import { runAllCollectors } from './collectors';
 import { Job } from './db/schema';
+import { scoreNewJobs } from './scoring';
+import { parseExperienceYears } from './collectors/filters';
+import { isOptFriendly } from './data/opt-friendly-companies';
+
+/**
+ * Deduplicate jobs across ATS sources by normalized title + company.
+ * Prefers original ATS postings over aggregators (simplifyjobs).
+ */
+function deduplicateJobs(jobs: Job[]): Job[] {
+  const seen = new Map<string, Job>();
+  const aggregators = new Set(['simplifyjobs']);
+
+  for (const job of jobs) {
+    const key = `${job.title.toLowerCase().trim()}||${job.company.toLowerCase().trim()}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, job);
+    } else {
+      // Keep original ATS over aggregator
+      if (aggregators.has(existing.ats_source) && !aggregators.has(job.ats_source)) {
+        seen.set(key, job);
+      }
+      // Otherwise keep the first one (discard this duplicate)
+    }
+  }
+  return Array.from(seen.values());
+}
 
 export interface RunResult {
   runId: number;
@@ -41,6 +68,14 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
     errors.push(err.message);
   }
 
+  // Deduplicate across ATS sources (same title + company)
+  const beforeDedup = jobs.length;
+  jobs = deduplicateJobs(jobs);
+  const dupsRemoved = beforeDedup - jobs.length;
+  if (dupsRemoved > 0) {
+    console.log(`[Orchestrator] Removed ${dupsRemoved} cross-ATS duplicates`);
+  }
+
   const insertJob = db.prepare(`
     INSERT OR IGNORE INTO jobs
       (external_id, title, company, ats_source, location, remote, posted_at,
@@ -51,13 +86,17 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
   `);
 
   let jobsNew = 0;
+  const newJobIds: number[] = [];
   const insertMany = db.transaction((jobList: Job[]) => {
     for (const job of jobList) {
       const result = insertJob.run({
         ...job,
         remote: job.remote ? 1 : 0,
       });
-      if (result.changes > 0) jobsNew++;
+      if (result.changes > 0) {
+        jobsNew++;
+        newJobIds.push(result.lastInsertRowid as number);
+      }
     }
   });
 
@@ -67,6 +106,53 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
     errors.push(`DB insert error: ${err.message}`);
   }
 
+  // Score newly inserted jobs based on user preferences
+  try {
+    scoreNewJobs(newJobIds);
+  } catch (err: any) {
+    errors.push(`Scoring error: ${err.message}`);
+  }
+
+  // Parse experience-years from descriptions for Entry Roles filtering
+  try {
+    const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
+    const rows = db.prepare(
+      `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+    ).all(...newJobIds) as any[];
+    for (const row of rows) {
+      let desc = row.description_snippet || '';
+      if (row.raw_json) {
+        try {
+          const raw = JSON.parse(row.raw_json);
+          desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
+          if (typeof desc !== 'string') desc = '';
+          desc = desc.replace(/<[^>]+>/g, ' ');
+        } catch { /* use snippet */ }
+      }
+      const years = parseExperienceYears(row.title + ' ' + desc);
+      if (years !== null) {
+        expStmt.run(years, row.id);
+      }
+    }
+  } catch (err: any) {
+    errors.push(`Experience parsing error: ${err.message}`);
+  }
+
+  // Flag OPT-friendly companies for new jobs
+  try {
+    const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ? WHERE id = ?');
+    const optRows = db.prepare(
+      `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+    ).all(...newJobIds) as { id: number; company: string }[];
+    db.transaction(() => {
+      for (const row of optRows) {
+        optStmt.run(isOptFriendly(row.company) ? 1 : 0, row.id);
+      }
+    })();
+  } catch (err: any) {
+    errors.push(`OPT flagging error: ${err.message}`);
+  }
+
   const finishedAt = new Date().toISOString();
   db.prepare(`
     UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, errors = ?, status = 'completed'
@@ -74,7 +160,7 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
   `).run(finishedAt, jobs.length, jobsNew, errors.join('; '), runId);
 
   isRunning = false;
-  console.log(`[Orchestrator] Run #${runId} complete: ${jobs.length} found, ${jobsNew} new`);
+  console.log(`[Orchestrator] Run #${runId} complete: ${jobs.length} found, ${jobsNew} new, ${dupsRemoved} cross-ATS dupes removed`);
 
   return { runId, jobsFound: jobs.length, jobsNew, errors, status: 'completed' };
 }

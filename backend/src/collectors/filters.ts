@@ -71,9 +71,54 @@ export function detectRemote(title: string, location: string, description: strin
 
 export function detectExperienceLevel(title: string): 'entry' | 'internship' | 'coop' {
   const t = title.toLowerCase();
-  if (t.includes('co-op') || t.includes('coop')) return 'coop';
-  if (t.includes('intern') || t.includes('internship')) return 'internship';
+  if (/\bco-?op\b/.test(t)) return 'coop';
+  if (/\bintern\b|\binternship\b/.test(t)) return 'internship';
   return 'entry';
+}
+
+/** Check if title indicates an entry-level role (intern, junior, new grad, etc.) */
+export function isEntryTitle(title: string): boolean {
+  const t = (title || '').toLowerCase();
+  return /\bintern\b|\binternship\b|\bco-?op\b|\bjunior\b|\bjr\.?\b|\bnew\s+grads?\b|\bentry[\s-]level\b|\bapprentice\b|\bearly\s+career\b|\bgraduates?\b|\bassociate\b|\bfellow\b|\bstudent\b/.test(t);
+}
+
+/**
+ * Parse the minimum experience-years requirement from a job description.
+ * Returns the lowest "X+ years" / "X years" number found, or null if none.
+ */
+export function parseExperienceYears(text: string): number | null {
+  if (!text) return null;
+  const plain = text.replace(/<[^>]+>/g, ' ').toLowerCase();
+
+  // Match patterns like: "3+ years", "3-5 years", "minimum 3 years", "at least 3 years",
+  // "3 years of experience", "3 yrs", "three years"
+  const WORD_NUMS: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+
+  const wordNumPattern = 'one|two|three|four|five|six|seven|eight|nine|ten';
+  const patterns = [
+    // "3+ years", "3-5 years", "3 to 5 years"
+    /(\d{1,2})\s*(?:\+|\-\s*\d{1,2}|\s+to\s+\d{1,2})?\s*(?:years?|yrs?)\b/g,
+    // "minimum three years", "at least three years"
+    /(?:minimum|at\s+least|requires?)\s+(\w+)\s+(?:years?|yrs?)\b/g,
+    // "three years", "five to seven years" (standalone word numbers)
+    new RegExp(`\\b(${wordNumPattern})\\s*(?:\\+|\\s*(?:-|to)\\s*(?:${wordNumPattern}|\\d{1,2}))?\\s*(?:years?|yrs?)\\b`, 'g'),
+  ];
+
+  const found: number[] = [];
+  for (const pat of patterns) {
+    let m;
+    while ((m = pat.exec(plain)) !== null) {
+      const raw = m[1];
+      const n = WORD_NUMS[raw] ?? parseInt(raw, 10);
+      if (!isNaN(n) && n >= 0 && n <= 20) found.push(n);
+    }
+  }
+
+  if (found.length === 0) return null;
+  // Return the minimum years number found (the lowest requirement mentioned)
+  return Math.min(...found);
 }
 
 export interface FilterResult {

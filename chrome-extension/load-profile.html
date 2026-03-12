@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Load Profile — Job Tracker Extension</title>
+  <style>
+    body { font-family: system-ui; background: #11111b; color: #cdd6f4; padding: 40px; max-width: 600px; margin: 0 auto; }
+    h1 { color: #89b4fa; font-size: 22px; margin-bottom: 8px; }
+    p { color: #6c7086; font-size: 13px; margin-bottom: 24px; }
+    textarea {
+      width: 100%; height: 320px; background: #1e1e2e; border: 1px solid #313244;
+      border-radius: 8px; color: #cdd6f4; font-size: 12px; padding: 14px;
+      font-family: monospace; resize: vertical; box-sizing: border-box;
+    }
+    button {
+      margin-top: 12px; padding: 10px 28px; background: #1e66f5; color: #fff;
+      border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    #status { margin-top: 12px; font-size: 13px; color: #a6e3a1; }
+    #err { margin-top: 12px; font-size: 13px; color: #f38ba8; }
+  </style>
+</head>
+<body>
+  <h1>🎯 Load Your Profile</h1>
+  <p>Paste the contents of your <code>profile.json</code> below and click Save. This stores your profile in the extension's local storage so the popup can use it.</p>
+  <textarea id="json-input" placeholder='{"personal": {"name": "...", ...}}'></textarea>
+  <br/>
+  <button id="save-btn">Save Profile to Extension</button>
+  <div id="status"></div>
+  <div id="err"></div>
+
+  <script src="src/load-profile.js"></script>
+</body>
+</html>

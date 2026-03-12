@@ -1,14 +1,24 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { registerRoutes } from './routes';
 
 export function buildServer() {
   const app = Fastify({ logger: false });
 
   app.register(cors, {
-    origin: ['http://localhost:3000', 'http://localhost:5173'],
+    origin: (origin, cb) => {
+      const allowed =
+        !origin ||
+        origin.startsWith('chrome-extension://') ||
+        origin === 'http://localhost:3000' ||
+        origin === 'http://localhost:5173';
+      cb(null, allowed);
+    },
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   });
+
+  app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB max
 
   app.register(registerRoutes);
 

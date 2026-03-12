@@ -15,6 +15,7 @@ export interface Job {
   status: string;
   raw_json: string;
   first_seen_at: string;
+  relevance_score?: number;
 }
 
 export interface Company {
@@ -33,4 +34,18 @@ export interface Run {
   jobs_new: number;
   errors: string;
   status: string;
+}
+
+export interface UserPreferences {
+  keywords: string[];
+  company_allowlist: string[];
+  company_blocklist: string[];
+}
+
+export interface PushSubscription {
+  id?: number;
+  endpoint: string;
+  keys_p256dh: string;
+  keys_auth: string;
+  created_at: string;
 }

@@ -1,3 +1,24 @@
 .claude
 backend/node_modules
 frontend/node_modules
+
+# Environment / secrets
+.env
+*.env
+backend/.env
+
+# Database
+backend/jobs.db
+backend/jobs.db-journal
+backend/jobs.db-wal
+
+# Build output
+backend/dist
+frontend/dist
+
+# OS
+.DS_Store
+
+
+Todo2.md
+Extension-Todo.md
