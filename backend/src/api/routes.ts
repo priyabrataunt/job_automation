@@ -1,11 +1,27 @@
 import { FastifyInstance } from 'fastify';
 import db from '../db/database';
-import { runCollection, isCollectionRunning } from '../orchestrator';
+import { runCollection, runJSearchCollection, isCollectionRunning } from '../orchestrator';
 import { getPreferences, rescoreAllJobs } from '../scoring';
 import { scoreResume, recencyMultiplier } from '../resume';
 import { PDFParse } from 'pdf-parse';
 import axios from 'axios';
 import OpenAI from 'openai';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+// Load writing-style reference so AI outputs sound like the user
+let writingStylePrompt = '';
+try {
+  const sample = readFileSync(resolve(__dirname, '../../../Priyabrata_Writing.txt'), 'utf-8').trim();
+  writingStylePrompt = `## Writing Style Reference
+Below are real writing samples from the candidate. When generating ANY text (cover letters, form answers, follow-up messages), match this person's natural voice — their sentence structure, word choices, level of formality, and tone. Do NOT copy the content; copy the style.
+
+${sample}
+
+IMPORTANT: Write in this person's voice. Keep it natural and human — not overly polished or robotic.`;
+} catch (err) {
+  console.warn('[routes] Could not load Priyabrata_Writing.txt — AI will use default voice');
+}
 
 const SPONSOR_POSITIVE = [
   'will sponsor', 'visa sponsorship', 'h1b', 'h-1b', 'opt eligible', 'cpt eligible',
@@ -201,6 +217,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.send({ message: `Collection started (${hoursBack}h back)` });
+  });
+
+  // POST /api/collect/jsearch — manual-only JSearch (LinkedIn/Indeed/Glassdoor)
+  app.post('/api/collect/jsearch', async (request, reply) => {
+    const { hours = '48' } = request.query as { hours?: string };
+    const hoursBack = parseInt(hours) || 48;
+
+    setImmediate(() => {
+      runJSearchCollection(hoursBack).catch(err => console.error('[API] JSearch error:', err));
+    });
+
+    return reply.send({ message: `JSearch collection started (${hoursBack}h back)` });
   });
 
   // GET /api/collect/status
@@ -516,10 +544,14 @@ ${stripHtml(description).slice(0, 3000)}
 - Keep it professional but not robotic — show personality
 - Output only the cover letter text, no headers or meta-commentary`;
 
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+    if (writingStylePrompt) messages.push({ role: 'system', content: writingStylePrompt });
+    messages.push({ role: 'user', content: prompt });
+
     const completion = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       max_tokens: 600,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
     });
 
     const text = completion.choices[0]?.message?.content || '';
@@ -590,11 +622,15 @@ ${JSON.stringify(cappedFields, null, 2)}
 
     try {
       const client = new OpenAI({ apiKey });
+      const aiFillMessages: Array<{ role: 'system' | 'user'; content: string }> = [];
+      if (writingStylePrompt) aiFillMessages.push({ role: 'system', content: writingStylePrompt });
+      aiFillMessages.push({ role: 'user', content: prompt });
+
       const completion = await client.chat.completions.create({
-        model: 'gpt-5-mini',
+        model: 'gpt-4o-mini',
         max_completion_tokens: 1200,
         response_format: { type: 'json_object' },
-        messages: [{ role: 'user', content: prompt }],
+        messages: aiFillMessages,
       });
 
       const raw = completion.choices[0]?.message?.content || '{}';
@@ -605,6 +641,217 @@ ${JSON.stringify(cappedFields, null, 2)}
       const aiError = err?.message || 'OpenAI request failed';
       return reply.send({ answers: {}, aiError });
     }
+  });
+
+  // POST /api/follow-up/draft — generate a follow-up message for a job
+  app.post('/api/follow-up/draft', async (request, reply) => {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey || apiKey === 'your_api_key_here') {
+      // Return a template if no API key configured
+      const { jobId } = request.body as { jobId: number };
+      const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+      if (!job) return reply.code(404).send({ error: 'Job not found' });
+
+      const daysAgo = Math.floor((Date.now() - new Date(job.status_updated_at || job.first_seen_at).getTime()) / (1000 * 60 * 60 * 24));
+      const template = `Hi,\n\nI recently applied for the ${job.title} position at ${job.company} about ${daysAgo} days ago and wanted to express my continued interest in the role.\n\nI believe my background in software engineering aligns well with what you're looking for, and I'd welcome the opportunity to discuss how I can contribute to your team.\n\nWould you have a few minutes to chat this week?\n\nBest regards`;
+      return reply.send({ ok: true, message: template, source: 'template' });
+    }
+
+    const { jobId } = request.body as { jobId: number };
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+    if (!job) return reply.code(404).send({ error: 'Job not found' });
+
+    const resume = db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
+    const daysAgo = Math.floor((Date.now() - new Date(job.status_updated_at || job.first_seen_at).getTime()) / (1000 * 60 * 60 * 24));
+
+    const client = new OpenAI({ apiKey });
+    const prompt = `Write a brief, professional LinkedIn follow-up message (3-4 sentences, ~60 words) for someone who applied to a job ${daysAgo} days ago with no response.
+
+Job: ${job.title} at ${job.company}
+Location: ${job.location || 'Not specified'}
+${resume?.resume_text ? `\nCandidate highlights: ${resume.resume_text.slice(0, 500)}` : ''}
+
+Guidelines:
+- Mention the specific role and company
+- Express continued interest without being pushy
+- Reference one relevant skill/experience if resume is available
+- End with a soft ask (open to a brief chat, happy to share more details, etc.)
+- Do NOT include subject line, greeting name, or sign-off name
+- Do NOT use placeholder text like [Your Name] or [Recruiter Name]
+- Keep it concise and ready to paste into LinkedIn
+- Output only the message text, nothing else`;
+
+    try {
+      const followUpMessages: Array<{ role: 'system' | 'user'; content: string }> = [];
+      if (writingStylePrompt) followUpMessages.push({ role: 'system', content: writingStylePrompt });
+      followUpMessages.push({ role: 'user', content: prompt });
+
+      const completion = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        max_tokens: 200,
+        messages: followUpMessages,
+      });
+      const text = completion.choices[0]?.message?.content || '';
+      return reply.send({ ok: true, message: text.trim(), source: 'ai' });
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message || 'AI generation failed' });
+    }
+  });
+
+  // GET /api/analytics — application velocity & conversion analytics
+  app.get('/api/analytics', async (request, reply) => {
+    const { days = '30' } = request.query as { days?: string };
+    const daysBack = Math.min(parseInt(days) || 30, 90);
+    const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+
+    // 1. Conversion funnel: count jobs in each meaningful status
+    const funnel = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status IN ('saved','queued','applied','followed_up','response','rejected') THEN 1 ELSE 0 END) as saved,
+        SUM(CASE WHEN status IN ('applied','followed_up','response','rejected') THEN 1 ELSE 0 END) as applied,
+        SUM(CASE WHEN status = 'followed_up' THEN 1 ELSE 0 END) as followed_up,
+        SUM(CASE WHEN status = 'response' THEN 1 ELSE 0 END) as response,
+        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+      FROM jobs WHERE is_us_job(location) = 1
+    `).get() as any;
+
+    // 2. Applications per day (last N days)
+    const appsPerDay = db.prepare(`
+      SELECT DATE(status_updated_at) as day, COUNT(*) as count
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND status_updated_at IS NOT NULL
+        AND status_updated_at >= ?
+      GROUP BY DATE(status_updated_at)
+      ORDER BY day ASC
+    `).all(cutoff) as any[];
+
+    // 3. Response rate by ATS source
+    const bySource = db.prepare(`
+      SELECT
+        ats_source,
+        COUNT(*) as applied,
+        SUM(CASE WHEN status = 'response' THEN 1 ELSE 0 END) as responses,
+        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejections
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND is_us_job(location) = 1
+      GROUP BY ats_source
+      ORDER BY applied DESC
+    `).all() as any[];
+
+    // 4. Response rate by job title keyword
+    const titleRows = db.prepare(`
+      SELECT title, status
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND is_us_job(location) = 1
+    `).all() as any[];
+
+    // Bucket titles into keywords
+    const titleKeywords: Record<string, { applied: number; responses: number }> = {};
+    const TITLE_BUCKETS = [
+      'Software Engineer', 'Frontend', 'Backend', 'Full Stack', 'Fullstack',
+      'Data Engineer', 'Data Scientist', 'ML Engineer', 'Machine Learning',
+      'DevOps', 'SRE', 'Platform', 'Cloud', 'QA', 'Security', 'Intern',
+    ];
+    for (const row of titleRows) {
+      const t = (row.title || '').toLowerCase();
+      let matched = false;
+      for (const bucket of TITLE_BUCKETS) {
+        if (t.includes(bucket.toLowerCase())) {
+          if (!titleKeywords[bucket]) titleKeywords[bucket] = { applied: 0, responses: 0 };
+          titleKeywords[bucket].applied++;
+          if (row.status === 'response') titleKeywords[bucket].responses++;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        if (!titleKeywords['Other']) titleKeywords['Other'] = { applied: 0, responses: 0 };
+        titleKeywords['Other'].applied++;
+        if (row.status === 'response') titleKeywords['Other'].responses++;
+      }
+    }
+    const byTitle = Object.entries(titleKeywords)
+      .map(([title, data]) => ({ title, ...data, rate: data.applied > 0 ? Math.round((data.responses / data.applied) * 100) : 0 }))
+      .sort((a, b) => b.applied - a.applied);
+
+    // 5. Average days to response (for jobs that got a response)
+    const responseTimeRows = db.prepare(`
+      SELECT
+        JULIANDAY(status_updated_at) - JULIANDAY(first_seen_at) as days_to_response
+      FROM jobs
+      WHERE status = 'response'
+        AND status_updated_at IS NOT NULL
+        AND first_seen_at IS NOT NULL
+    `).all() as any[];
+    const avgDaysToResponse = responseTimeRows.length > 0
+      ? Math.round(responseTimeRows.reduce((sum: number, r: any) => sum + (r.days_to_response || 0), 0) / responseTimeRows.length * 10) / 10
+      : null;
+
+    // 6. Weekly application velocity (apps per week over last N weeks)
+    const weeksBack = Math.ceil(daysBack / 7);
+    const weeklyVelocity = db.prepare(`
+      SELECT
+        STRFTIME('%Y-W%W', status_updated_at) as week,
+        COUNT(*) as count
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND status_updated_at IS NOT NULL
+        AND status_updated_at >= ?
+      GROUP BY STRFTIME('%Y-W%W', status_updated_at)
+      ORDER BY week ASC
+    `).all(cutoff) as any[];
+
+    // 7. OPT-friendly vs non-OPT response rates
+    const optAnalysis = db.prepare(`
+      SELECT
+        opt_friendly,
+        COUNT(*) as applied,
+        SUM(CASE WHEN status = 'response' THEN 1 ELSE 0 END) as responses
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND is_us_job(location) = 1
+      GROUP BY opt_friendly
+    `).all() as any[];
+
+    // 8. Easy apply (Greenhouse/Lever/Ashby) vs hard apply (Workday etc.) response rates
+    const easyApplySources = ['greenhouse', 'lever', 'ashby'];
+    const difficultyAnalysis = db.prepare(`
+      SELECT
+        CASE WHEN ats_source IN ('greenhouse','lever','ashby') THEN 'easy' ELSE 'hard' END as difficulty,
+        COUNT(*) as applied,
+        SUM(CASE WHEN status = 'response' THEN 1 ELSE 0 END) as responses
+      FROM jobs
+      WHERE status IN ('applied','followed_up','response','rejected')
+        AND is_us_job(location) = 1
+      GROUP BY CASE WHEN ats_source IN ('greenhouse','lever','ashby') THEN 'easy' ELSE 'hard' END
+    `).all() as any[];
+
+    return reply.send({
+      funnel,
+      apps_per_day: appsPerDay,
+      weekly_velocity: weeklyVelocity,
+      by_source: bySource.map(r => ({
+        ...r,
+        rate: r.applied > 0 ? Math.round((r.responses / r.applied) * 100) : 0,
+      })),
+      by_title: byTitle,
+      avg_days_to_response: avgDaysToResponse,
+      opt_analysis: optAnalysis.map(r => ({
+        opt_friendly: !!r.opt_friendly,
+        applied: r.applied,
+        responses: r.responses,
+        rate: r.applied > 0 ? Math.round((r.responses / r.applied) * 100) : 0,
+      })),
+      difficulty_analysis: difficultyAnalysis.map(r => ({
+        ...r,
+        rate: r.applied > 0 ? Math.round((r.responses / r.applied) * 100) : 0,
+      })),
+      period_days: daysBack,
+    });
   });
 
   // GET /health

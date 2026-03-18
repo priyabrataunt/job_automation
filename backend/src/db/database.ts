@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { COMPANIES as WORKDAY_COMPANIES } from '../collectors/workday';
 import { parseExperienceYears, isEntryTitle, detectExperienceLevel } from '../collectors/filters';
-import { isOptFriendly } from '../data/opt-friendly-companies';
+import { isOptFriendly, getSponsorTier } from '../data/opt-friendly-companies';
 
 const DB_PATH = path.join(__dirname, '../../jobs.db');
 
@@ -168,6 +168,13 @@ export function initDb(): void {
     // Column already exists — ignore
   }
 
+  // Migration: add sponsor_tier for tiered visa intelligence (top/regular/known/null)
+  try {
+    db.exec(`ALTER TABLE jobs ADD COLUMN sponsor_tier TEXT DEFAULT NULL`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // User preferences (single-row config)
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_preferences (
@@ -312,6 +319,27 @@ export function initDb(): void {
     })();
     if (flagged > 0) {
       console.log(`[DB] Flagged ${flagged} OPT-friendly companies`);
+    }
+  }
+
+  // Backfill sponsor_tier for all jobs
+  const untiered = db.prepare(
+    `SELECT id, company FROM jobs WHERE sponsor_tier IS NULL`
+  ).all() as { id: number; company: string }[];
+  if (untiered.length > 0) {
+    const updateTier = db.prepare('UPDATE jobs SET sponsor_tier = ? WHERE id = ?');
+    let tiered = 0;
+    db.transaction(() => {
+      for (const row of untiered) {
+        const tier = getSponsorTier(row.company);
+        if (tier) {
+          updateTier.run(tier, row.id);
+          tiered++;
+        }
+      }
+    })();
+    if (tiered > 0) {
+      console.log(`[DB] Set sponsor_tier for ${tiered} jobs`);
     }
   }
 

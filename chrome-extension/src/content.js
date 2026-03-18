@@ -285,30 +285,48 @@ async function autoFill(profile) {
   console.log('[AutoFill] Phase 1 done:', filled.length, 'filled,', unknownMap.size, 'unknown fields for AI');
 
   // ── Phase 2: AI-fill unknown fields via backend ───────────────────────────
+  // NOTE: fetch is routed through the background service worker to avoid
+  // mixed-content blocks (HTTPS page → HTTP localhost = blocked in content scripts).
   if (unknownMap.size > 0) {
     const fields = Array.from(unknownMap.values()).map(v => v.descriptor);
     const baseUrl = (profile.job_tracker_url || 'http://localhost:8000').replace(/\/$/, '');
 
-    console.log('[AutoFill] Phase 2: sending', fields.length, 'fields to AI at', baseUrl);
+    console.log('[AutoFill] Phase 2: sending', fields.length, 'fields to AI via background proxy');
     console.log('[AutoFill] Fields:', JSON.stringify(fields.map(f => f.label)));
     showPageBanner('AI filling ' + unknownMap.size + ' fields...', 'info');
 
     try {
-      // Use AbortController for wider browser compatibility
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-
-      const res = await fetch(baseUrl + '/api/ai-fill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields, profile }),
-        signal: controller.signal,
+      // Route fetch through background service worker (avoids HTTPS→HTTP mixed content block)
+      const proxyResponse = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('AI request timed out (30s). Backend may be slow or unreachable.')), 30000);
+        chrome.runtime.sendMessage({
+          type: 'FETCH_PROXY',
+          url: baseUrl + '/api/ai-fill',
+          options: {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields, profile }),
+          },
+        }, (response) => {
+          clearTimeout(timer);
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message || 'Extension messaging error'));
+          } else {
+            resolve(response);
+          }
+        });
       });
 
-      clearTimeout(timeout);
+      if (proxyResponse.error) {
+        throw new Error(proxyResponse.error);
+      }
 
-      if (res.ok) {
-        const data = await res.json();
+      if (proxyResponse.ok) {
+        let data;
+        try { data = JSON.parse(proxyResponse.body); } catch (_) {
+          console.error('[AutoFill] Failed to parse proxy response body:', proxyResponse.body);
+          data = {};
+        }
         const answers = (data && data.answers) || {};
         if (data.aiError) {
           aiError = data.aiError;
@@ -319,6 +337,27 @@ async function autoFill(profile) {
           console.log('[AutoFill] AI answers:', JSON.stringify(answers));
         }
 
+        // Re-scan DOM for fresh element references (React/Vue may have re-rendered during AI wait)
+        const freshInputs = Array.from(document.querySelectorAll('input, textarea, select'));
+        const freshByLabel = new Map();
+        const freshRadioGroups = new Map();
+        for (const el of freshInputs) {
+          try {
+            if (el.type === 'hidden' || el.type === 'submit' || el.type === 'button' || el.type === 'file') continue;
+            if (el.readOnly || el.disabled) continue;
+            const label = getLabel(el);
+            if (!label) continue;
+            const labelKey = label.trim().slice(0, 80);
+            if (el.type === 'radio') {
+              if (!freshRadioGroups.has(labelKey)) freshRadioGroups.set(labelKey, []);
+              freshRadioGroups.get(labelKey).push(el);
+              if (!freshByLabel.has(labelKey)) freshByLabel.set(labelKey, el);
+            } else if (!freshByLabel.has(labelKey)) {
+              freshByLabel.set(labelKey, el);
+            }
+          } catch (_) {}
+        }
+
         let aiFilled = 0;
         for (const [labelKey, entry] of unknownMap) {
           const answer = answers[labelKey];
@@ -327,8 +366,11 @@ async function autoFill(profile) {
             continue;
           }
           try {
+            // Use fresh DOM element if available, fall back to original reference
+            const freshEl = freshByLabel.get(labelKey) || entry.el;
+
             if (entry.descriptor.type === 'radio') {
-              const radios = radioGroups.get(labelKey) || [entry.el];
+              const radios = freshRadioGroups.get(labelKey) || radioGroups.get(labelKey) || [freshEl];
               const ok = radios.some(r => fillInput(r, String(answer)));
               if (ok) {
                 filled.push(labelKey.slice(0, 40) + ' (AI)');
@@ -338,7 +380,7 @@ async function autoFill(profile) {
                 skipped.push(labelKey.slice(0, 40));
               }
             } else {
-              const ok = fillInput(entry.el, String(answer));
+              const ok = fillInput(freshEl, String(answer));
               if (ok) {
                 filled.push(labelKey.slice(0, 40) + ' (AI)');
                 aiFilled++;
@@ -362,18 +404,14 @@ async function autoFill(profile) {
           hideBanner(4000);
         }
       } else {
-        let errText = '';
-        try { errText = await res.text(); } catch (_) {}
-        aiError = 'Server ' + res.status + ': ' + errText.slice(0, 100);
+        aiError = 'Server ' + proxyResponse.status + ': ' + (proxyResponse.body || '').slice(0, 100);
         console.error('[AutoFill] Server error:', aiError);
-        showPageBanner('AI fill failed: ' + res.status, 'error');
+        showPageBanner('AI fill failed: ' + proxyResponse.status, 'error');
         hideBanner(5000);
         for (const [k] of unknownMap) skipped.push(k.slice(0, 40));
       }
     } catch (fetchErr) {
-      aiError = fetchErr.name === 'AbortError'
-        ? 'AI request timed out (30s). Backend may be slow or unreachable.'
-        : (fetchErr.message || 'Network error connecting to backend');
+      aiError = fetchErr.message || 'Network error connecting to backend';
       console.error('[AutoFill] Fetch error:', fetchErr);
       showPageBanner(aiError.slice(0, 60), 'error');
       hideBanner(5000);

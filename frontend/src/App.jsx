@@ -40,6 +40,7 @@ const SOURCE_COLORS = {
   smartrecruiters: '#e64553',
   workable: '#04a5e5',
   simplifyjobs: '#fe640b',
+  jsearch: '#ea76cb',
 }
 function SourceBadge({ source }) {
   return (
@@ -104,11 +105,23 @@ function VisaBadge({ signal }) {
   )
 }
 
-const EASY_APPLY_SOURCES = new Set(['greenhouse', 'lever', 'ashby'])
+const ATS_DIFFICULTY = {
+  greenhouse: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
+  lever: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
+  ashby: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
+  smartrecruiters: { level: 'medium', label: 'Medium Form', color: '#f9e2af', bg: '#3b2c00' },
+  workable: { level: 'medium', label: 'Medium Form', color: '#f9e2af', bg: '#3b2c00' },
+  workday: { level: 'hard', label: 'Long Form', color: '#f38ba8', bg: '#3b1c1c' },
+  simplifyjobs: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
+  jsearch: { level: 'varies', label: 'External Link', color: '#cba6f7', bg: '#2b1c3b' },
+}
 function EasyApplyBadge({ source }) {
-  if (!EASY_APPLY_SOURCES.has(source)) return null
+  const diff = ATS_DIFFICULTY[source]
+  if (!diff) return null
   return (
-    <span style={{ background: '#003344', color: '#89dceb', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>⚡ Easy Apply</span>
+    <span style={{ background: diff.bg, color: diff.color, fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>
+      {diff.label}
+    </span>
   )
 }
 
@@ -116,7 +129,22 @@ function OptFriendlyBadge({ optFriendly }) {
   if (!optFriendly) return null
   return (
     <span style={{ background: '#1c2b1e', color: '#a6e3a1', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700, border: '1px solid #40a02b' }}>
-      🌍 OPT Friendly
+      OPT Friendly
+    </span>
+  )
+}
+
+function SponsorTierBadge({ tier }) {
+  if (!tier) return null
+  const config = {
+    top: { bg: '#1e4620', fg: '#a6e3a1', border: '#40a02b', label: 'Top Sponsor' },
+    regular: { bg: '#1c2b3e', fg: '#89dceb', border: '#1e66f5', label: 'Sponsor' },
+    known: { bg: '#2b2b1c', fg: '#f9e2af', border: '#df8e1d', label: 'Has Sponsored' },
+  }
+  const c = config[tier] || config.known
+  return (
+    <span style={{ background: c.bg, color: c.fg, fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700, border: `1px solid ${c.border}` }}>
+      {c.label}
     </span>
   )
 }
@@ -289,6 +317,7 @@ function JobCard({ job, onStatusChange, onOptimize }) {
         <TypeBadge type={job.job_type} />
         <EasyApplyBadge source={job.ats_source} />
         <OptFriendlyBadge optFriendly={job.opt_friendly} />
+        <SponsorTierBadge tier={job.sponsor_tier} />
         <VisaBadge signal={job.visa_signal} />
         {job.remote ? (
           <span style={{ background: '#003344', color: '#89dceb', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>Remote</span>
@@ -544,6 +573,7 @@ function TabBar({ tab, setTab, followUpCount }) {
     { id: 'saved', label: '💜 Saved' },
     { id: 'applied', label: '✅ Applied' },
     { id: 'followup', label: followUpCount > 0 ? `⏰ Follow-up (${followUpCount})` : '⏰ Follow-up' },
+    { id: 'analytics', label: '📊 Analytics' },
     { id: 'history', label: '📁 History' },
     { id: 'prefs', label: '⚙️ Settings' },
   ]
@@ -573,10 +603,107 @@ function TabBar({ tab, setTab, followUpCount }) {
 }
 
 // ── Follow-up View ─────────────────────────────────────────────────────────
+function FollowUpMessageModal({ job, onClose }) {
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const [source, setSource] = useState('')
+
+  useEffect(() => {
+    async function generate() {
+      setLoading(true)
+      try {
+        const res = await fetch(`${API}/api/follow-up/draft`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId: job.id }),
+        })
+        const data = await res.json()
+        if (data.ok) {
+          setMessage(data.message)
+          setSource(data.source)
+        } else {
+          setMessage(`Hi,\n\nI applied for the ${job.title} position at ${job.company} recently and wanted to follow up on my application.\n\nI'm very interested in this opportunity and would love to discuss how I can contribute to your team.\n\nBest regards`)
+          setSource('fallback')
+        }
+      } catch {
+        setMessage(`Hi,\n\nI applied for the ${job.title} position at ${job.company} recently and wanted to follow up.\n\nBest regards`)
+        setSource('fallback')
+      }
+      setLoading(false)
+    }
+    generate()
+  }, [job])
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea')
+      ta.value = message
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }} onClick={onClose}>
+      <div style={{
+        background: '#1e1e2e', border: '1px solid #313244', borderRadius: 12,
+        padding: 24, width: 520, maxWidth: '95vw',
+      }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 16 }}>Follow-up Message</h3>
+        <div style={{ color: '#6c7086', fontSize: 12, marginBottom: 16 }}>
+          {job.title} at {job.company}
+          {source === 'ai' && <span style={{ color: '#8839ef', marginLeft: 8 }}>AI Generated</span>}
+          {source === 'template' && <span style={{ color: '#df8e1d', marginLeft: 8 }}>Template (no API key)</span>}
+        </div>
+        {loading ? (
+          <div style={{ color: '#6c7086', padding: 30, textAlign: 'center' }}>Generating message...</div>
+        ) : (
+          <>
+            <textarea
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              rows={8}
+              style={{
+                width: '100%', background: '#313244', border: '1px solid #45475a',
+                borderRadius: 8, padding: '10px 14px', color: '#cdd6f4', fontSize: 13,
+                lineHeight: 1.6, resize: 'vertical', boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button onClick={onClose} style={{
+                background: '#313244', color: '#cdd6f4', border: 'none',
+                borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13,
+              }}>Close</button>
+              <button onClick={handleCopy} style={{
+                background: copied ? '#1e4620' : '#1e66f5', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '8px 18px', fontWeight: 600, cursor: 'pointer', fontSize: 13,
+              }}>{copied ? 'Copied!' : 'Copy to Clipboard'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function FollowUpView({ onStatusChange, onOptimize }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState(5)
+  const [draftJob, setDraftJob] = useState(null)
 
   async function load(d) {
     setLoading(true)
@@ -614,7 +741,7 @@ function FollowUpView({ onStatusChange, onOptimize }) {
         </div>
       </div>
       <p style={{ color: '#6c7086', fontSize: 12, margin: '0 0 16px' }}>
-        Jobs you applied to {days}+ days ago with no response. Mark as <strong style={{ color: '#df8e1d' }}>followed up</strong> after sending a follow-up message.
+        Jobs you applied to {days}+ days ago with no response. Click <strong style={{ color: '#df8e1d' }}>Draft Message</strong> to generate a follow-up, then mark as <strong style={{ color: '#df8e1d' }}>followed up</strong>.
       </p>
       {loading ? (
         <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading...</div>
@@ -625,10 +752,22 @@ function FollowUpView({ onStatusChange, onOptimize }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {jobs.map(job => (
-            <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} />
+            <div key={job.id} style={{ position: 'relative' }}>
+              <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} />
+              <button
+                onClick={() => setDraftJob(job)}
+                style={{
+                  position: 'absolute', top: 10, right: 10,
+                  background: '#df8e1d', color: '#fff', border: 'none',
+                  borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 600,
+                  cursor: 'pointer', zIndex: 1,
+                }}
+              >Draft Message</button>
+            </div>
           ))}
         </div>
       )}
+      {draftJob && <FollowUpMessageModal job={draftJob} onClose={() => setDraftJob(null)} />}
     </div>
   )
 }
@@ -853,6 +992,317 @@ function AddJobModal({ onClose, onAdded }) {
   )
 }
 
+// ── Analytics View ────────────────────────────────────────────────────────
+function BarChart({ data, labelKey, valueKey, maxValue, color, secondaryKey, secondaryColor, formatLabel }) {
+  const max = maxValue || Math.max(...data.map(d => d[valueKey] || 0), 1)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {data.map((d, i) => {
+        const pct = Math.round(((d[valueKey] || 0) / max) * 100)
+        const secPct = secondaryKey ? Math.round(((d[secondaryKey] || 0) / max) * 100) : 0
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 120, fontSize: 12, color: '#a6adc8', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {formatLabel ? formatLabel(d[labelKey]) : d[labelKey]}
+            </div>
+            <div style={{ flex: 1, position: 'relative', height: 20, background: '#313244', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width 0.3s' }} />
+              {secondaryKey && secPct > 0 && (
+                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${secPct}%`, background: secondaryColor || '#40a02b', borderRadius: 4, opacity: 0.7, transition: 'width 0.3s' }} />
+              )}
+            </div>
+            <div style={{ width: 50, fontSize: 12, color: '#cdd6f4', fontWeight: 600, textAlign: 'right', flexShrink: 0 }}>
+              {d[valueKey]}{secondaryKey ? ` / ${d[secondaryKey]}` : ''}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FunnelChart({ funnel }) {
+  if (!funnel) return null
+  const stages = [
+    { label: 'Discovered', value: funnel.total, color: '#89b4fa' },
+    { label: 'Saved', value: funnel.saved, color: '#8839ef' },
+    { label: 'Applied', value: funnel.applied, color: '#40a02b' },
+    { label: 'Followed Up', value: funnel.followed_up, color: '#df8e1d' },
+    { label: 'Got Response', value: funnel.response, color: '#04a5e5' },
+    { label: 'Rejected', value: funnel.rejected, color: '#f38ba8' },
+  ]
+  const max = stages[0].value || 1
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {stages.map((s, i) => {
+        const pct = Math.max(4, Math.round((s.value / max) * 100))
+        const convRate = i > 0 && stages[i - 1].value > 0
+          ? Math.round((s.value / stages[i - 1].value) * 100)
+          : null
+        return (
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 100, fontSize: 12, color: '#a6adc8', textAlign: 'right', flexShrink: 0 }}>{s.label}</div>
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+              <div style={{
+                width: `${pct}%`, minWidth: 40,
+                height: 28, background: s.color, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, color: '#fff',
+                transition: 'width 0.3s',
+              }}>{s.value}</div>
+            </div>
+            <div style={{ width: 50, fontSize: 11, color: '#6c7086', flexShrink: 0 }}>
+              {convRate !== null ? `${convRate}%` : ''}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function MiniStat({ label, value, unit, color }) {
+  return (
+    <div style={{
+      background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10,
+      padding: '16px 20px', flex: '1 1 150px', minWidth: 140,
+    }}>
+      <div style={{ fontSize: 28, fontWeight: 700, color: color || '#cdd6f4' }}>{value ?? '—'}{unit && <span style={{ fontSize: 14, fontWeight: 400, color: '#6c7086' }}> {unit}</span>}</div>
+      <div style={{ fontSize: 12, color: '#6c7086', marginTop: 4 }}>{label}</div>
+    </div>
+  )
+}
+
+function AnalyticsView() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [days, setDays] = useState(30)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const res = await fetch(`${API}/api/analytics?days=${days}`)
+        const d = await res.json()
+        setData(d)
+      } catch (err) {
+        console.error('Analytics fetch error:', err)
+      }
+      setLoading(false)
+    }
+    load()
+  }, [days])
+
+  if (loading) return <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading analytics...</div>
+  if (!data) return <div style={{ color: '#f38ba8', padding: 40, textAlign: 'center' }}>Failed to load analytics.</div>
+
+  const totalApplied = data.funnel?.applied || 0
+  const totalResponses = data.funnel?.response || 0
+  const overallRate = totalApplied > 0 ? Math.round((totalResponses / totalApplied) * 100) : 0
+
+  // Compute avg apps/day from the daily data
+  const avgAppsPerDay = data.apps_per_day?.length > 0
+    ? Math.round(data.apps_per_day.reduce((s, d) => s + d.count, 0) / data.apps_per_day.length * 10) / 10
+    : 0
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18 }}>Application Analytics</h2>
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          {[7, 14, 30, 60].map(d => (
+            <button key={d} onClick={() => setDays(d)} style={{
+              background: days === d ? '#1e66f5' : '#313244',
+              color: days === d ? '#fff' : '#6c7086',
+              border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: days === d ? 700 : 400,
+            }}>{d}d</button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
+        <MiniStat label="Total Applied" value={totalApplied} color="#40a02b" />
+        <MiniStat label="Responses" value={totalResponses} color="#04a5e5" />
+        <MiniStat label="Response Rate" value={overallRate} unit="%" color={overallRate >= 10 ? '#a6e3a1' : overallRate >= 5 ? '#f9e2af' : '#f38ba8'} />
+        <MiniStat label="Avg Days to Response" value={data.avg_days_to_response} unit="days" color="#89b4fa" />
+        <MiniStat label="Avg Apps / Day" value={avgAppsPerDay} color="#df8e1d" />
+      </div>
+
+      {/* Funnel */}
+      <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 15 }}>Conversion Funnel</h3>
+        <FunnelChart funnel={data.funnel} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16, marginBottom: 20 }}>
+        {/* Response Rate by Source */}
+        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Source</h3>
+          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Which ATS platforms get the most callbacks?</p>
+          {data.by_source?.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {data.by_source.map(s => (
+                <div key={s.ats_source}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, color: '#cdd6f4', fontWeight: 600, textTransform: 'capitalize' }}>{s.ats_source}</span>
+                    <span style={{ fontSize: 12, color: s.rate > 0 ? '#a6e3a1' : '#6c7086' }}>
+                      {s.responses}/{s.applied} ({s.rate}%)
+                    </span>
+                  </div>
+                  <div style={{ height: 6, background: '#313244', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 3, transition: 'width 0.3s',
+                      width: `${Math.max(2, s.rate)}%`,
+                      background: s.rate >= 15 ? '#a6e3a1' : s.rate >= 5 ? '#f9e2af' : '#585b70',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet. Start applying to see conversion rates.</div>
+          )}
+        </div>
+
+        {/* Response Rate by Title */}
+        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Job Title</h3>
+          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Which roles get the most callbacks?</p>
+          {data.by_title?.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {data.by_title.map(t => (
+                <div key={t.title}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, color: '#cdd6f4', fontWeight: 600 }}>{t.title}</span>
+                    <span style={{ fontSize: 12, color: t.rate > 0 ? '#a6e3a1' : '#6c7086' }}>
+                      {t.responses}/{t.applied} ({t.rate}%)
+                    </span>
+                  </div>
+                  <div style={{ height: 6, background: '#313244', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 3, transition: 'width 0.3s',
+                      width: `${Math.max(2, t.rate)}%`,
+                      background: t.rate >= 15 ? '#a6e3a1' : t.rate >= 5 ? '#f9e2af' : '#585b70',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16, marginBottom: 20 }}>
+        {/* Easy vs Hard Apply */}
+        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Easy Apply vs Hard Apply</h3>
+          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Greenhouse/Lever/Ashby (easy) vs Workday/others (hard)</p>
+          {data.difficulty_analysis?.length > 0 ? (
+            <div style={{ display: 'flex', gap: 16 }}>
+              {data.difficulty_analysis.map(d => (
+                <div key={d.difficulty} style={{
+                  flex: 1, background: '#181825', borderRadius: 8, padding: 16, textAlign: 'center',
+                  border: `1px solid ${d.difficulty === 'easy' ? '#1e4620' : '#3b2c00'}`,
+                }}>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    {d.difficulty === 'easy' ? 'Easy Apply' : 'Hard Apply'}
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: d.difficulty === 'easy' ? '#a6e3a1' : '#f9e2af' }}>
+                    {d.rate}%
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+                    {d.responses} / {d.applied} apps
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
+          )}
+        </div>
+
+        {/* OPT-friendly analysis */}
+        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>OPT-Friendly vs Others</h3>
+          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Do known OPT sponsors respond more?</p>
+          {data.opt_analysis?.length > 0 ? (
+            <div style={{ display: 'flex', gap: 16 }}>
+              {data.opt_analysis.map(d => (
+                <div key={String(d.opt_friendly)} style={{
+                  flex: 1, background: '#181825', borderRadius: 8, padding: 16, textAlign: 'center',
+                  border: `1px solid ${d.opt_friendly ? '#1e4620' : '#313244'}`,
+                }}>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    {d.opt_friendly ? 'OPT Friendly' : 'Other Companies'}
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: d.opt_friendly ? '#a6e3a1' : '#cdd6f4' }}>
+                    {d.rate}%
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+                    {d.responses} / {d.applied} apps
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Daily Applications Timeline */}
+      <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Daily Applications</h3>
+        <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Applications submitted per day</p>
+        {data.apps_per_day?.length > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 120, padding: '0 4px' }}>
+            {data.apps_per_day.map((d, i) => {
+              const max = Math.max(...data.apps_per_day.map(x => x.count), 1)
+              const h = Math.max(4, Math.round((d.count / max) * 100))
+              return (
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <span style={{ fontSize: 9, color: '#a6adc8', fontWeight: 600 }}>{d.count}</span>
+                  <div style={{
+                    width: '100%', maxWidth: 28, height: `${h}%`, minHeight: 4,
+                    background: '#1e66f5', borderRadius: '3px 3px 0 0',
+                    transition: 'height 0.3s',
+                  }} />
+                  <span style={{ fontSize: 8, color: '#585b70', whiteSpace: 'nowrap' }}>
+                    {new Date(d.day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={{ color: '#45475a', fontSize: 13, padding: 30, textAlign: 'center' }}>
+            No application data yet. Apply to some jobs first!
+          </div>
+        )}
+      </div>
+
+      {/* Weekly Velocity */}
+      {data.weekly_velocity?.length > 1 && (
+        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Weekly Velocity</h3>
+          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Are you ramping up or slowing down?</p>
+          <BarChart
+            data={data.weekly_velocity}
+            labelKey="week"
+            valueKey="count"
+            color="#8839ef"
+            formatLabel={(w) => w ? `Week ${w.split('W')[1]}` : ''}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('digest')
@@ -861,6 +1311,7 @@ export default function App() {
   const [stats, setStats] = useState(null)
   const [lastRun, setLastRun] = useState(null)
   const [collecting, setCollecting] = useState(false)
+  const [jsearchCollecting, setJsearchCollecting] = useState(false)
   const [offset, setOffset] = useState(0)
   const [prefs, setPrefs] = useState({ keywords: [], company_allowlist: [], company_blocklist: [] })
   const [optimizeJob, setOptimizeJob] = useState(null)
@@ -940,12 +1391,13 @@ export default function App() {
 
   // Poll collection status
   useEffect(() => {
-    if (!collecting) return
+    if (!collecting && !jsearchCollecting) return
     const iv = setInterval(async () => {
       const res = await fetch(`${API}/api/collect/status`)
       const data = await res.json()
       if (!data.running) {
         setCollecting(false)
+        setJsearchCollecting(false)
         const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
         fetchJobs(filters, offset, statusOverride)
         fetchStats()
@@ -955,11 +1407,16 @@ export default function App() {
       }
     }, 3000)
     return () => clearInterval(iv)
-  }, [collecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount])
+  }, [collecting, jsearchCollecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount])
 
   async function handleCollect() {
     setCollecting(true)
     await fetch(`${API}/api/collect?hours=48`, { method: 'POST' })
+  }
+
+  async function handleJSearchCollect() {
+    setJsearchCollecting(true)
+    await fetch(`${API}/api/collect/jsearch?hours=48`, { method: 'POST' })
   }
 
   async function handleGlobalResumeUpload(e) {
@@ -1103,6 +1560,22 @@ export default function App() {
         >
           {collecting ? 'Collecting...' : '🔄 Collect Now'}
         </button>
+        <button
+          onClick={handleJSearchCollect}
+          disabled={jsearchCollecting || collecting}
+          style={{
+            background: jsearchCollecting ? '#313244' : '#40a02b',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 16px',
+            fontWeight: 600,
+            cursor: (jsearchCollecting || collecting) ? 'not-allowed' : 'pointer',
+            fontSize: 13,
+          }}
+        >
+          {jsearchCollecting ? 'Searching...' : '🔍 LinkedIn / Indeed'}
+        </button>
       </div>
 
       {/* Tabs */}
@@ -1118,6 +1591,11 @@ export default function App() {
         {/* Follow-up Tab */}
         {tab === 'followup' && (
           <FollowUpView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} />
+        )}
+
+        {/* Analytics Tab */}
+        {tab === 'analytics' && (
+          <AnalyticsView />
         )}
 
         {/* History Tab */}
@@ -1150,6 +1628,7 @@ export default function App() {
                 <StatCard value={bsrc.smartrecruiters || 0} label="SmartRecruit" color="#fe640b" />
                 <StatCard value={bsrc.workable || 0} label="Workable" color="#04a5e5" />
                 <StatCard value={bsrc.simplifyjobs || 0} label="Simplify" color="#fe640b" />
+                <StatCard value={bsrc.jsearch || 0} label="JSearch" color="#ea76cb" />
               </div>
             )}
 
@@ -1183,7 +1662,7 @@ export default function App() {
                 </select>
               )}
               {[
-                { key: 'ats_source', label: 'Source', options: ['', 'greenhouse', 'lever', 'ashby', 'workday', 'smartrecruiters', 'workable', 'simplifyjobs'] },
+                { key: 'ats_source', label: 'Source', options: ['', 'greenhouse', 'lever', 'ashby', 'workday', 'smartrecruiters', 'workable', 'simplifyjobs', 'jsearch'] },
                 { key: 'job_type', label: 'Type', options: ['', 'fulltime', 'internship', 'coop'] },
                 { key: 'remote', label: 'Remote', options: ['', 'true', 'false'] },
                 { key: 'hours', label: 'Posted', options: ['', '6', '24', '48'] },
