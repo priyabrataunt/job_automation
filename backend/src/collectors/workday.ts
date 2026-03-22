@@ -11,52 +11,13 @@ interface WorkdayCompany {
 
 // Board URLs — format: https://{id}.{wd}.myworkdayjobs.com/wday/cxs/{id}/{board}/jobs
 // Failures are handled gracefully; invalid entries just return 0 jobs.
+// Only verified-working Workday configs (others moved to SmartRecruiters)
 export const COMPANIES: WorkdayCompany[] = [
-  // ── Big Tech ──────────────────────────────────────────────────────────
   { id: 'nvidia', wd: 'wd5', board: 'NVIDIAExternalCareerSite', displayName: 'NVIDIA' },
   { id: 'adobe', wd: 'wd5', board: 'external_experienced', displayName: 'Adobe' },
-  { id: 'salesforce', wd: 'wd12', board: 'External', displayName: 'Salesforce' },
-  { id: 'servicenow', wd: 'wd1', board: 'Careers', displayName: 'ServiceNow' },
-  { id: 'intuit', wd: 'wd5', board: 'Intuit', displayName: 'Intuit' },
-  { id: 'netflix', wd: 'wd5', board: 'External', displayName: 'Netflix' },
-  { id: 'oracle', wd: 'wd1', board: 'Careers', displayName: 'Oracle' },
-  { id: 'uber', wd: 'wd5', board: 'Uber', displayName: 'Uber' },
-
-  // ── Cybersecurity / Infra ─────────────────────────────────────────────
   { id: 'crowdstrike', wd: 'wd5', board: 'crowdstrikecareers', displayName: 'CrowdStrike' },
-  { id: 'paloaltonetworks', wd: 'wd5', board: 'Careers', displayName: 'Palo Alto Networks' },
-  { id: 'fortinet', wd: 'wd5', board: 'FTNTExternalCareerSite', displayName: 'Fortinet' },
-  { id: 'zscaler', wd: 'wd5', board: 'Careers', displayName: 'Zscaler' },
-
-  // ── Semiconductors ────────────────────────────────────────────────────
-  { id: 'qualcomm', wd: 'wd5', board: 'External', displayName: 'Qualcomm' },
   { id: 'intel', wd: 'wd1', board: 'External', displayName: 'Intel' },
-  { id: 'amd', wd: 'wd1', board: 'AMD', displayName: 'AMD' },
-  { id: 'broadcom', wd: 'wd1', board: 'External', displayName: 'Broadcom' },
-
-  // ── Finance / Fintech ─────────────────────────────────────────────────
-  { id: 'capitalone', wd: 'wd1', board: 'Capital_One', displayName: 'Capital One' },
-  { id: 'visa', wd: 'wd5', board: 'ExternalSite', displayName: 'Visa' },
   { id: 'mastercard', wd: 'wd1', board: 'CorporateCareers', displayName: 'Mastercard' },
-  { id: 'goldmansachs', wd: 'wd1', board: 'GS_Careers', displayName: 'Goldman Sachs' },
-  { id: 'morganstanley', wd: 'wd5', board: 'morganstanley', displayName: 'Morgan Stanley' },
-  { id: 'jpmc', wd: 'wd3', board: 'JPMCCampus', displayName: 'JPMorgan Chase' },
-
-  // ── Defense / Aerospace ───────────────────────────────────────────────
-  { id: 'lockheedmartin', wd: 'wd5', board: 'LMCAREER', displayName: 'Lockheed Martin' },
-  { id: 'northropgrumman', wd: 'wd5', board: 'ExternalSite', displayName: 'Northrop Grumman' },
-  { id: 'rtx', wd: 'wd1', board: 'RTX_Careers', displayName: 'RTX (Raytheon)' },
-  { id: 'generaldynamics', wd: 'wd5', board: 'ExternalCareerSite', displayName: 'General Dynamics' },
-  { id: 'boeing', wd: 'wd1', board: 'EXTERNAL', displayName: 'Boeing' },
-  { id: 'lmco', wd: 'wd5', board: 'SpaceCareerSite', displayName: 'Lockheed Space' },
-
-  // ── Enterprise / Consulting ───────────────────────────────────────────
-  { id: 'deloitteus', wd: 'wd5', board: 'AutoDeloitteUS', displayName: 'Deloitte' },
-  { id: 'accenture', wd: 'wd3', board: 'AccentureCareers', displayName: 'Accenture' },
-  { id: 'ibm', wd: 'wd1', board: 'External', displayName: 'IBM' },
-  { id: 'cisco', wd: 'wd5', board: 'External', displayName: 'Cisco' },
-
-  // ── Hardware / Consumer ───────────────────────────────────────────────
   { id: 'hp', wd: 'wd5', board: 'ExternalCareerSite', displayName: 'HP' },
   { id: 'dell', wd: 'wd1', board: 'External', displayName: 'Dell' },
 ];
