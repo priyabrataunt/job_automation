@@ -11,9 +11,9 @@ function ScoreGauge({ score, label, title }) {
 
   return (
     <div style={{ textAlign: 'center', flex: 1, minWidth: 120 }}>
-      <div style={{ fontSize: 11, color: '#a6adc8', marginBottom: 6, fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 600 }}>{title}</div>
       <svg width="100" height="100" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r={radius} fill="none" stroke="#313244" strokeWidth="8" />
+        <circle cx="50" cy="50" r={radius} fill="none" stroke="var(--bg-surface-alt)" strokeWidth="8" />
         <circle
           cx="50" cy="50" r={radius} fill="none"
           stroke={color} strokeWidth="8" strokeLinecap="round"
@@ -21,7 +21,7 @@ function ScoreGauge({ score, label, title }) {
           transform="rotate(-90 50 50)"
           style={{ transition: 'stroke-dashoffset 0.8s ease' }}
         />
-        <text x="50" y="46" textAnchor="middle" fill="#cdd6f4" fontSize="22" fontWeight="700">
+        <text x="50" y="46" textAnchor="middle" fill="var(--text-primary)" fontSize="22" fontWeight="700">
           {score}
         </text>
         <text x="50" y="62" textAnchor="middle" fill={color} fontSize="10" fontWeight="600">
@@ -37,24 +37,24 @@ function KeywordPills({ matched, missing }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div>
-        <div style={{ fontSize: 11, color: '#a6adc8', marginBottom: 4 }}>Matched Keywords</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>Matched Keywords</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {matched.length === 0 && <span style={{ fontSize: 11, color: '#45475a' }}>None</span>}
+          {matched.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-empty)' }}>None</span>}
           {matched.map(k => (
             <span key={k} style={{
-              background: '#1e4620', color: '#a6e3a1',
+              background: 'var(--bg-green)', color: 'var(--fg-green)',
               fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 600,
             }}>{k}</span>
           ))}
         </div>
       </div>
       <div>
-        <div style={{ fontSize: 11, color: '#a6adc8', marginBottom: 4 }}>Missing Keywords</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>Missing Keywords</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {missing.length === 0 && <span style={{ fontSize: 11, color: '#45475a' }}>None</span>}
+          {missing.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-empty)' }}>None</span>}
           {missing.map(k => (
             <span key={k} style={{
-              background: '#3b1c1c', color: '#f38ba8',
+              background: 'var(--bg-red)', color: 'var(--fg-red)',
               fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 600,
             }}>{k}</span>
           ))}
@@ -90,26 +90,26 @@ function ResumeUpload({ onUploaded, currentFile }) {
 
   return (
     <div style={{
-      background: '#1e1e2e', border: '2px dashed #45475a', borderRadius: 10,
+      background: 'var(--bg-surface)', border: '2px dashed var(--border-subtle)', borderRadius: 10,
       padding: '20px 24px', textAlign: 'center',
     }}>
       {currentFile ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-          <span style={{ color: '#a6e3a1', fontSize: 13, fontWeight: 600 }}>
+          <span style={{ color: 'var(--fg-green)', fontSize: 13, fontWeight: 600 }}>
             Resume uploaded: {currentFile}
           </span>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             style={{
-              background: '#313244', color: '#cdd6f4', border: 'none', borderRadius: 6,
+              background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none', borderRadius: 6,
               padding: '6px 14px', fontSize: 12, cursor: 'pointer',
             }}
           >{uploading ? 'Uploading...' : 'Replace'}</button>
         </div>
       ) : (
         <div>
-          <div style={{ color: '#6c7086', fontSize: 13, marginBottom: 10 }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 10 }}>
             Upload your resume (PDF or TXT) to get started
           </div>
           <button
@@ -129,7 +129,7 @@ function ResumeUpload({ onUploaded, currentFile }) {
         style={{ display: 'none' }}
         onChange={handleUpload}
       />
-      {error && <div style={{ color: '#f38ba8', fontSize: 12, marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ color: 'var(--fg-red)', fontSize: 12, marginTop: 8 }}>{error}</div>}
     </div>
   )
 }
@@ -207,25 +207,25 @@ export default function ResumeOptimizer({ job, onClose }) {
       overflowY: 'auto', padding: '20px 0',
     }}>
       <div style={{
-        background: '#11111b', borderRadius: 14, width: '100%', maxWidth: 720,
+        background: 'var(--bg-base)', borderRadius: 14, width: '100%', maxWidth: 720,
         margin: 'auto', padding: 0, maxHeight: '95vh', display: 'flex', flexDirection: 'column',
       }}>
         {/* Header */}
         <div style={{
-          padding: '16px 24px', borderBottom: '1px solid #313244',
+          padding: '16px 24px', borderBottom: '1px solid var(--border)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           flexShrink: 0,
         }}>
           <div>
-            <h2 style={{ margin: 0, color: '#cdd6f4', fontSize: 18 }}>ATS Compatibility Score</h2>
-            <div style={{ fontSize: 12, color: '#6c7086', marginTop: 2 }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 18 }}>ATS Compatibility Score</h2>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {job.title} at {job.company}
             </div>
           </div>
           <button
             onClick={onClose}
             style={{
-              background: '#313244', color: '#cdd6f4', border: 'none', borderRadius: 8,
+              background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none', borderRadius: 8,
               padding: '6px 14px', cursor: 'pointer', fontSize: 16, fontWeight: 700,
             }}
           >X</button>
@@ -245,7 +245,7 @@ export default function ResumeOptimizer({ job, onClose }) {
               onClick={handleScore}
               disabled={scoring}
               style={{
-                background: scoring ? '#313244' : '#1e66f5', color: '#fff',
+                background: scoring ? 'var(--bg-surface-alt)' : '#1e66f5', color: '#fff',
                 border: 'none', borderRadius: 10, padding: '12px 0',
                 fontWeight: 700, fontSize: 15, cursor: scoring ? 'not-allowed' : 'pointer',
                 width: '100%',
@@ -254,7 +254,7 @@ export default function ResumeOptimizer({ job, onClose }) {
           )}
 
           {error && (
-            <div style={{ background: '#3b1c1c', color: '#f38ba8', padding: '10px 16px', borderRadius: 8, fontSize: 13 }}>
+            <div style={{ background: 'var(--bg-red)', color: 'var(--fg-red)', padding: '10px 16px', borderRadius: 8, fontSize: 13 }}>
               {error}
             </div>
           )}
@@ -265,7 +265,7 @@ export default function ResumeOptimizer({ job, onClose }) {
               {/* Visa warning banner */}
               {result.visaSignal?.score === 0 && (
                 <div style={{
-                  background: '#3b1c1c', color: '#f38ba8', padding: '10px 16px',
+                  background: 'var(--bg-red)', color: 'var(--fg-red)', padding: '10px 16px',
                   borderRadius: 8, fontSize: 13, fontWeight: 600,
                 }}>
                   No Sponsor — This job likely does not sponsor visas. Applying may not be worth your time.
@@ -274,7 +274,7 @@ export default function ResumeOptimizer({ job, onClose }) {
 
               {/* Four metric gauges */}
               <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: 16, background: '#1e1e2e', borderRadius: 12, padding: '20px 16px',
+                display: 'flex', flexWrap: 'wrap', gap: 16, background: 'var(--bg-surface)', borderRadius: 12, padding: '20px 16px',
               }}>
                 <ScoreGauge score={result.skillsMatch.score} label={result.skillsMatch.label} title="Skills Match" />
                 <ScoreGauge score={result.relevance.score} label={result.relevance.label} title="Relevance" />
@@ -284,24 +284,24 @@ export default function ResumeOptimizer({ job, onClose }) {
 
               {/* Overall score badge */}
               <div style={{
-                background: '#1e1e2e', borderRadius: 10, padding: '16px 20px',
+                background: 'var(--bg-surface)', borderRadius: 10, padding: '16px 20px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
               }}>
                 <span style={{
-                  fontSize: 32, fontWeight: 800, color: '#cdd6f4',
+                  fontSize: 32, fontWeight: 800, color: 'var(--text-primary)',
                 }}>{result.overall}</span>
                 <div>
                   <div style={{
                     fontSize: 14, fontWeight: 700,
                     color: result.overall >= 80 ? '#40a02b' : result.overall >= 60 ? '#df8e1d' : result.overall >= 40 ? '#e64553' : '#d20f39',
                   }}>{result.overallLabel}</div>
-                  <div style={{ fontSize: 11, color: '#6c7086' }}>Overall Score (out of 100)</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Overall Score (out of 100)</div>
                 </div>
               </div>
 
               {/* Metric details */}
               <div style={{
-                background: '#181825', borderRadius: 10, padding: 16,
+                background: 'var(--bg-surface-deep)', borderRadius: 10, padding: 16,
                 display: 'flex', flexDirection: 'column', gap: 8,
               }}>
                 {[
@@ -312,20 +312,20 @@ export default function ResumeOptimizer({ job, onClose }) {
                 ].map(m => (
                   <div key={m.label} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                     <span style={{
-                      background: '#313244', color: '#89b4fa', borderRadius: 4,
+                      background: 'var(--bg-surface-alt)', color: 'var(--text-link)', borderRadius: 4,
                       padding: '2px 6px', fontSize: 11, fontWeight: 700, fontFamily: 'monospace',
                       flexShrink: 0,
                     }}>{m.icon}</span>
                     <div>
-                      <span style={{ fontSize: 12, color: '#cdd6f4', fontWeight: 600 }}>{m.label}: </span>
-                      <span style={{ fontSize: 12, color: '#a6adc8' }}>{m.detail}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{m.label}: </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{m.detail}</span>
                     </div>
                   </div>
                 ))}
               </div>
 
               {/* Keywords */}
-              <div style={{ background: '#1e1e2e', borderRadius: 10, padding: 16 }}>
+              <div style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: 16 }}>
                 <KeywordPills matched={result.matchedKeywords} missing={result.missingKeywords} />
               </div>
 
@@ -345,17 +345,17 @@ export default function ResumeOptimizer({ job, onClose }) {
 
           {/* ── Cover Letter Generator ── */}
           {resumeFile && (
-            <div style={{ background: '#1e1e2e', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ background: 'var(--bg-surface)', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                  <div style={{ color: '#cdd6f4', fontWeight: 700, fontSize: 15 }}>✉️ Cover Letter</div>
-                  <div style={{ color: '#6c7086', fontSize: 11, marginTop: 2 }}>Claude generates a personalized letter from your resume + this JD</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15 }}>✉️ Cover Letter</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>Claude generates a personalized letter from your resume + this JD</div>
                 </div>
                 <button
                   onClick={handleGenerateCoverLetter}
                   disabled={generatingCL}
                   style={{
-                    background: generatingCL ? '#313244' : '#8839ef',
+                    background: generatingCL ? 'var(--bg-surface-alt)' : '#8839ef',
                     color: '#fff', border: 'none', borderRadius: 8,
                     padding: '8px 18px', fontWeight: 600, fontSize: 13,
                     cursor: generatingCL ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
@@ -364,7 +364,7 @@ export default function ResumeOptimizer({ job, onClose }) {
               </div>
 
               {clError && (
-                <div style={{ background: '#3b1c1c', color: '#f38ba8', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}>
+                <div style={{ background: 'var(--bg-red)', color: 'var(--fg-red)', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}>
                   {clError}
                 </div>
               )}
@@ -375,9 +375,9 @@ export default function ResumeOptimizer({ job, onClose }) {
                     readOnly
                     value={coverLetter}
                     style={{
-                      width: '100%', minHeight: 260, background: '#181825',
-                      border: '1px solid #45475a', borderRadius: 8,
-                      color: '#cdd6f4', fontSize: 12, lineHeight: 1.7,
+                      width: '100%', minHeight: 260, background: 'var(--bg-surface-deep)',
+                      border: '1px solid var(--border-subtle)', borderRadius: 8,
+                      color: 'var(--text-primary)', fontSize: 12, lineHeight: 1.7,
                       padding: '12px 14px', resize: 'vertical', boxSizing: 'border-box',
                       fontFamily: 'system-ui, sans-serif',
                     }}
@@ -386,8 +386,8 @@ export default function ResumeOptimizer({ job, onClose }) {
                     onClick={() => { navigator.clipboard.writeText(coverLetter); setClCopied(true); setTimeout(() => setClCopied(false), 2000) }}
                     style={{
                       alignSelf: 'flex-end',
-                      background: clCopied ? '#1e4620' : '#313244',
-                      color: clCopied ? '#a6e3a1' : '#cdd6f4',
+                      background: clCopied ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+                      color: clCopied ? 'var(--fg-green)' : 'var(--text-primary)',
                       border: 'none', borderRadius: 6,
                       padding: '6px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     }}

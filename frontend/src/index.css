@@ -1,38 +1,98 @@
+/* ── Theme Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Dark theme (default) */
+  --bg-base:         #11111b;
+  --bg-header:       #181825;
+  --bg-surface:      #1e1e2e;
+  --bg-surface-alt:  #313244;
+  --bg-surface-deep: #181825;
+  --border:          #313244;
+  --border-subtle:   #45475a;
+
+  --text-primary:    #cdd6f4;
+  --text-secondary:  #a6adc8;
+  --text-muted:      #6c7086;
+  --text-faint:      #585b70;
+  --text-link:       #89b4fa;
+  --text-empty:      #45475a;
+
+  /* Semantic status backgrounds (dark) */
+  --bg-green:        #1e4620;
+  --bg-green-deep:   #1c2e1c;
+  --bg-red:          #3b1c1c;
+  --bg-yellow:       #3b2c00;
+  --bg-blue:         #1c2b3e;
+  --bg-purple:       #2b1c3b;
+  --bg-teal:         #003344;
+  --bg-opt:          #1c2b1e;
+
+  /* Semantic status foregrounds */
+  --fg-green:        #a6e3a1;
+  --fg-red:          #f38ba8;
+  --fg-yellow:       #f9e2af;
+  --fg-blue:         #89dceb;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-base:         #f5f5f7;
+  --bg-header:       #ffffff;
+  --bg-surface:      #ffffff;
+  --bg-surface-alt:  #e8e8f0;
+  --bg-surface-deep: #f0f0f5;
+  --border:          #d1d5db;
+  --border-subtle:   #e5e7eb;
+
+  --text-primary:    #111827;
+  --text-secondary:  #374151;
+  --text-muted:      #6b7280;
+  --text-faint:      #9ca3af;
+  --text-link:       #1d4ed8;
+  --text-empty:      #9ca3af;
+
+  /* Semantic status backgrounds (light) */
+  --bg-green:        #dcfce7;
+  --bg-green-deep:   #dcfce7;
+  --bg-red:          #fee2e2;
+  --bg-yellow:       #fef9c3;
+  --bg-blue:         #dbeafe;
+  --bg-purple:       #ede9fe;
+  --bg-teal:         #cffafe;
+  --bg-opt:          #dcfce7;
+
+  /* Semantic status foregrounds (light — darker for readability) */
+  --fg-green:        #15803d;
+  --fg-red:          #dc2626;
+  --fg-yellow:       #ca8a04;
+  --fg-blue:         #0891b2;
+
+  color-scheme: light;
+}
+
+/* ── Base Styles ──────────────────────────────────────────────────────────── */
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+a {
+  font-weight: 500;
+  color: var(--text-link);
+  text-decoration: inherit;
 }
 
 button {
@@ -42,27 +102,49 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
   cursor: pointer;
   transition: border-color 0.25s;
 }
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+/* ── Theme Toggle ─────────────────────────────────────────────────────────── */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  transition: background 0.2s, color 0.2s;
+}
+.theme-toggle:hover {
+  color: var(--text-primary);
+}
+.theme-toggle-track {
+  width: 28px;
+  height: 14px;
+  background: var(--bg-surface-deep);
+  border-radius: 14px;
+  position: relative;
+  border: 1px solid var(--border-subtle);
+  transition: background 0.2s;
+}
+.theme-toggle-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  position: absolute;
+  top: 1px;
+  transition: left 0.15s, background 0.2s;
+}
+[data-theme="light"] .theme-toggle-track {
+  background: #c7d2fe;
+  border-color: #818cf8;
+}
+[data-theme="light"] .theme-toggle-thumb {
+  background: #4f46e5;
 }

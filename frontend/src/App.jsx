@@ -20,14 +20,14 @@ function StatCard({ value, label, color }) {
   return (
     <div style={{
       borderTop: `3px solid ${color}`,
-      background: '#1e1e2e',
+      background: 'var(--bg-surface)',
       borderRadius: 8,
       padding: '12px 16px',
       minWidth: 90,
       flex: '1 1 90px',
     }}>
-      <div style={{ fontSize: 24, fontWeight: 700, color: '#cdd6f4' }}>{value ?? 0}</div>
-      <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)' }}>{value ?? 0}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{label}</div>
     </div>
   )
 }
@@ -57,9 +57,9 @@ function SourceBadge({ source }) {
 }
 
 const TYPE_COLORS = {
-  fulltime: { bg: '#313244', fg: '#cdd6f4' },
-  internship: { bg: '#1e4620', fg: '#a6e3a1' },
-  coop: { bg: '#3b2c00', fg: '#f9e2af' },
+  fulltime: { bg: 'var(--bg-surface-alt)', fg: 'var(--text-primary)' },
+  internship: { bg: 'var(--bg-green)', fg: 'var(--fg-green)' },
+  coop: { bg: 'var(--bg-yellow)', fg: 'var(--fg-yellow)' },
 }
 function TypeBadge({ type }) {
   const c = TYPE_COLORS[type] || TYPE_COLORS.fulltime
@@ -95,25 +95,25 @@ const STATUS_COLORS = {
 function VisaBadge({ signal }) {
   if (signal === null || signal === undefined) return null
   if (signal === 100) return (
-    <span style={{ background: '#1e4620', color: '#a6e3a1', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700 }}>✓ Sponsors</span>
+    <span style={{ background: 'var(--bg-green)', color: 'var(--fg-green)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700 }}>✓ Sponsors</span>
   )
   if (signal === 0) return (
-    <span style={{ background: '#3b1c1c', color: '#f38ba8', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700 }}>✗ No Sponsor</span>
+    <span style={{ background: 'var(--bg-red)', color: 'var(--fg-red)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700 }}>✗ No Sponsor</span>
   )
   return (
-    <span style={{ background: '#3b2c00', color: '#f9e2af', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>? Visa Unknown</span>
+    <span style={{ background: 'var(--bg-yellow)', color: 'var(--fg-yellow)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>? Visa Unknown</span>
   )
 }
 
 const ATS_DIFFICULTY = {
-  greenhouse: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
-  lever: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
-  ashby: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
-  smartrecruiters: { level: 'medium', label: 'Medium Form', color: '#f9e2af', bg: '#3b2c00' },
-  workable: { level: 'medium', label: 'Medium Form', color: '#f9e2af', bg: '#3b2c00' },
-  workday: { level: 'hard', label: 'Long Form', color: '#f38ba8', bg: '#3b1c1c' },
-  simplifyjobs: { level: 'easy', label: 'Quick Apply', color: '#a6e3a1', bg: '#1e4620' },
-  jsearch: { level: 'varies', label: 'External Link', color: '#cba6f7', bg: '#2b1c3b' },
+  greenhouse: { level: 'easy', label: 'Quick Apply', color: 'var(--fg-green)', bg: 'var(--bg-green)' },
+  lever: { level: 'easy', label: 'Quick Apply', color: 'var(--fg-green)', bg: 'var(--bg-green)' },
+  ashby: { level: 'easy', label: 'Quick Apply', color: 'var(--fg-green)', bg: 'var(--bg-green)' },
+  smartrecruiters: { level: 'medium', label: 'Medium Form', color: 'var(--fg-yellow)', bg: 'var(--bg-yellow)' },
+  workable: { level: 'medium', label: 'Medium Form', color: 'var(--fg-yellow)', bg: 'var(--bg-yellow)' },
+  workday: { level: 'hard', label: 'Long Form', color: 'var(--fg-red)', bg: 'var(--bg-red)' },
+  simplifyjobs: { level: 'easy', label: 'Quick Apply', color: 'var(--fg-green)', bg: 'var(--bg-green)' },
+  jsearch: { level: 'varies', label: 'External Link', color: '#cba6f7', bg: 'var(--bg-purple)' },
 }
 function EasyApplyBadge({ source }) {
   const diff = ATS_DIFFICULTY[source]
@@ -128,7 +128,7 @@ function EasyApplyBadge({ source }) {
 function OptFriendlyBadge({ optFriendly }) {
   if (!optFriendly) return null
   return (
-    <span style={{ background: '#1c2b1e', color: '#a6e3a1', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700, border: '1px solid #40a02b' }}>
+    <span style={{ background: 'var(--bg-opt)', color: 'var(--fg-green)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700, border: '1px solid #40a02b' }}>
       OPT Friendly
     </span>
   )
@@ -137,9 +137,9 @@ function OptFriendlyBadge({ optFriendly }) {
 function SponsorTierBadge({ tier }) {
   if (!tier) return null
   const config = {
-    top: { bg: '#1e4620', fg: '#a6e3a1', border: '#40a02b', label: 'Top Sponsor' },
-    regular: { bg: '#1c2b3e', fg: '#89dceb', border: '#1e66f5', label: 'Sponsor' },
-    known: { bg: '#2b2b1c', fg: '#f9e2af', border: '#df8e1d', label: 'Has Sponsored' },
+    top: { bg: 'var(--bg-green)', fg: 'var(--fg-green)', border: '#40a02b', label: 'Top Sponsor' },
+    regular: { bg: 'var(--bg-blue)', fg: 'var(--fg-blue)', border: '#1e66f5', label: 'Sponsor' },
+    known: { bg: 'var(--bg-yellow)', fg: 'var(--fg-yellow)', border: '#df8e1d', label: 'Has Sponsored' },
   }
   const c = config[tier] || config.known
   return (
@@ -152,11 +152,11 @@ function SponsorTierBadge({ tier }) {
 function ScoreBar({ score }) {
   const maxScore = 100
   const pct = Math.min(100, Math.round((score / maxScore) * 100))
-  const color = pct >= 60 ? '#40a02b' : pct >= 30 ? '#df8e1d' : '#6c7086'
+  const color = pct >= 60 ? '#40a02b' : pct >= 30 ? '#df8e1d' : 'var(--text-muted)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div style={{
-        width: 60, height: 6, background: '#313244', borderRadius: 3, overflow: 'hidden',
+        width: 60, height: 6, background: 'var(--bg-surface-alt)', borderRadius: 3, overflow: 'hidden',
       }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3 }} />
       </div>
@@ -188,18 +188,18 @@ function ScoreTooltip({ details, score, children }) {
           left: '50%',
           transform: 'translateX(-50%)',
           marginTop: 8,
-          background: '#181825',
-          border: '1px solid #45475a',
+          background: 'var(--bg-surface-deep)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 10,
           padding: '14px 16px',
           width: 300,
           zIndex: 999,
           boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
           fontSize: 12,
-          color: '#cdd6f4',
+          color: 'var(--text-primary)',
           lineHeight: 1.5,
         }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: '#cdd6f4' }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--text-primary)' }}>
             Score Breakdown
           </div>
 
@@ -212,17 +212,17 @@ function ScoreTooltip({ details, score, children }) {
           ].filter(({ metric }) => metric != null).map(({ label, metric, weight }) => (
             <div key={label} style={{ marginBottom: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                <span style={{ color: '#a6adc8' }}>{label} <span style={{ color: '#585b70' }}>({weight})</span></span>
-                <span style={{ fontWeight: 600, color: metric.score >= 60 ? '#a6e3a1' : metric.score >= 40 ? '#f9e2af' : '#f38ba8' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>{label} <span style={{ color: 'var(--text-faint)' }}>({weight})</span></span>
+                <span style={{ fontWeight: 600, color: metric.score >= 60 ? 'var(--fg-green)' : metric.score >= 40 ? 'var(--fg-yellow)' : 'var(--fg-red)' }}>
                   {metric.score}%
                 </span>
               </div>
-              <div style={{ height: 4, background: '#313244', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: 4, background: 'var(--bg-surface-alt)', borderRadius: 2, overflow: 'hidden' }}>
                 <div style={{
                   width: `${metric.score}%`,
                   height: '100%',
                   borderRadius: 2,
-                  background: metric.score >= 60 ? '#a6e3a1' : metric.score >= 40 ? '#f9e2af' : '#f38ba8',
+                  background: metric.score >= 60 ? 'var(--fg-green)' : metric.score >= 40 ? 'var(--fg-yellow)' : 'var(--fg-red)',
                 }} />
               </div>
             </div>
@@ -231,18 +231,18 @@ function ScoreTooltip({ details, score, children }) {
           {/* Matched keywords */}
           {parsed.matchedKeywords?.length > 0 && (
             <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, color: '#a6e3a1', fontWeight: 600, marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-green)', fontWeight: 600, marginBottom: 4 }}>
                 ✓ Matched Skills ({parsed.matchedKeywords.length})
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {parsed.matchedKeywords.slice(0, 12).map(kw => (
                   <span key={kw} style={{
-                    background: '#1e4620', color: '#a6e3a1',
+                    background: 'var(--bg-green)', color: 'var(--fg-green)',
                     fontSize: 10, padding: '1px 6px', borderRadius: 4,
                   }}>{kw}</span>
                 ))}
                 {parsed.matchedKeywords.length > 12 && (
-                  <span style={{ fontSize: 10, color: '#585b70' }}>+{parsed.matchedKeywords.length - 12} more</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>+{parsed.matchedKeywords.length - 12} more</span>
                 )}
               </div>
             </div>
@@ -251,18 +251,18 @@ function ScoreTooltip({ details, score, children }) {
           {/* Missing keywords */}
           {parsed.missingKeywords?.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 11, color: '#f38ba8', fontWeight: 600, marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-red)', fontWeight: 600, marginBottom: 4 }}>
                 ✗ Missing Skills ({parsed.missingKeywords.length})
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {parsed.missingKeywords.slice(0, 8).map(kw => (
                   <span key={kw} style={{
-                    background: '#45475a', color: '#f38ba8',
+                    background: 'var(--bg-surface-alt)', color: 'var(--fg-red)',
                     fontSize: 10, padding: '1px 6px', borderRadius: 4,
                   }}>{kw}</span>
                 ))}
                 {parsed.missingKeywords.length > 8 && (
-                  <span style={{ fontSize: 10, color: '#585b70' }}>+{parsed.missingKeywords.length - 8} more</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>+{parsed.missingKeywords.length - 8} more</span>
                 )}
               </div>
             </div>
@@ -276,9 +276,9 @@ function ScoreTooltip({ details, score, children }) {
 function JobCard({ job, onStatusChange, onOptimize }) {
   return (
     <div style={{
-      background: '#1e1e2e',
-      border: '1px solid #313244',
-      borderLeft: `4px solid ${STATUS_COLORS[job.status] || '#45475a'}`,
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border)',
+      borderLeft: `4px solid ${STATUS_COLORS[job.status] || 'var(--border-subtle)'}`,
       borderRadius: 8,
       padding: '14px 18px',
       display: 'flex',
@@ -292,14 +292,14 @@ function JobCard({ job, onStatusChange, onOptimize }) {
               href={job.apply_url}
               target="_blank"
               rel="noreferrer"
-              style={{ color: '#89b4fa', fontWeight: 600, fontSize: 15, textDecoration: 'none' }}
+              style={{ color: 'var(--text-link)', fontWeight: 600, fontSize: 15, textDecoration: 'none' }}
             >{job.title}</a>
             {job.relevance_score != null && <ScoreBar score={job.relevance_score} />}
             {job.hired_score != null && (
               <ScoreTooltip details={job.hired_score_details} score={job.hired_score}>
                 <span style={{
-                  background: job.hired_score >= 70 ? '#1e4620' : job.hired_score >= 40 ? '#3b2c00' : '#45475a',
-                  color: job.hired_score >= 70 ? '#a6e3a1' : job.hired_score >= 40 ? '#f9e2af' : '#6c7086',
+                  background: job.hired_score >= 70 ? 'var(--bg-green)' : job.hired_score >= 40 ? 'var(--bg-yellow)' : 'var(--bg-surface-alt)',
+                  color: job.hired_score >= 70 ? 'var(--fg-green)' : job.hired_score >= 40 ? 'var(--fg-yellow)' : 'var(--text-muted)',
                   fontSize: 11, fontWeight: 700,
                   padding: '2px 8px', borderRadius: 99,
                   whiteSpace: 'nowrap',
@@ -307,9 +307,9 @@ function JobCard({ job, onStatusChange, onOptimize }) {
               </ScoreTooltip>
             )}
           </div>
-          <div style={{ color: '#a6adc8', fontSize: 13, marginTop: 2 }}>{job.company}</div>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 2 }}>{job.company}</div>
         </div>
-        <div style={{ fontSize: 11, color: '#6c7086', whiteSpace: 'nowrap' }}>{timeAgo(job.posted_at || job.first_seen_at)}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{timeAgo(job.posted_at || job.first_seen_at)}</div>
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -320,15 +320,15 @@ function JobCard({ job, onStatusChange, onOptimize }) {
         <SponsorTierBadge tier={job.sponsor_tier} />
         <VisaBadge signal={job.visa_signal} />
         {job.remote ? (
-          <span style={{ background: '#003344', color: '#89dceb', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>Remote</span>
+          <span style={{ background: 'var(--bg-teal)', color: 'var(--fg-blue)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>Remote</span>
         ) : null}
         {job.location ? (
-          <span style={{ color: '#6c7086', fontSize: 11 }}>📍 {job.location}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>📍 {job.location}</span>
         ) : null}
       </div>
 
       {job.description_snippet ? (
-        <p style={{ color: '#7f849c', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
           {job.description_snippet.slice(0, 200)}{job.description_snippet.length > 200 ? '…' : ''}
         </p>
       ) : null}
@@ -339,8 +339,8 @@ function JobCard({ job, onStatusChange, onOptimize }) {
             key={s}
             onClick={() => onStatusChange(job.id, s)}
             style={{
-              background: job.status === s ? STATUS_COLORS[s] : '#313244',
-              color: job.status === s ? '#fff' : '#6c7086',
+              background: job.status === s ? STATUS_COLORS[s] : 'var(--bg-surface-alt)',
+              color: job.status === s ? '#fff' : 'var(--text-muted)',
               border: 'none',
               borderRadius: 6,
               padding: '4px 10px',
@@ -424,25 +424,25 @@ function PreferencesPanel({ prefs, onSave }) {
 
   const inputStyle = {
     width: '100%',
-    background: '#313244',
-    border: '1px solid #45475a',
+    background: 'var(--bg-surface-alt)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 6,
     padding: '8px 12px',
-    color: '#cdd6f4',
+    color: 'var(--text-primary)',
     fontSize: 13,
     boxSizing: 'border-box',
   }
 
   return (
     <div style={{
-      background: '#1e1e2e', border: '1px solid #313244',
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
       borderRadius: 10, padding: 20, maxWidth: 600,
     }}>
-      <h3 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 16 }}>⚙️ Personalization Preferences</h3>
+      <h3 style={{ color: 'var(--text-primary)', margin: '0 0 16px', fontSize: 16 }}>⚙️ Personalization Preferences</h3>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 12, color: '#a6adc8', marginBottom: 4, display: 'block' }}>
-          Tech Stack Keywords <span style={{ color: '#6c7086' }}>(comma-separated)</span>
+        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>
+          Tech Stack Keywords <span style={{ color: 'var(--text-muted)' }}>(comma-separated)</span>
         </label>
         <input
           value={keywords}
@@ -453,8 +453,8 @@ function PreferencesPanel({ prefs, onSave }) {
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 12, color: '#a6adc8', marginBottom: 4, display: 'block' }}>
-          Favorite Companies <span style={{ color: '#6c7086' }}>(comma-separated)</span>
+        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>
+          Favorite Companies <span style={{ color: 'var(--text-muted)' }}>(comma-separated)</span>
         </label>
         <input
           value={allowlist}
@@ -465,8 +465,8 @@ function PreferencesPanel({ prefs, onSave }) {
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 12, color: '#a6adc8', marginBottom: 4, display: 'block' }}>
-          Blocked Companies <span style={{ color: '#6c7086' }}>(comma-separated)</span>
+        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>
+          Blocked Companies <span style={{ color: 'var(--text-muted)' }}>(comma-separated)</span>
         </label>
         <input
           value={blocklist}
@@ -485,7 +485,7 @@ function PreferencesPanel({ prefs, onSave }) {
             padding: '8px 20px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontSize: 13,
           }}
         >{saving ? 'Saving...' : 'Save & Rescore'}</button>
-        {msg && <span style={{ fontSize: 12, color: '#a6e3a1' }}>{msg}</span>}
+        {msg && <span style={{ fontSize: 12, color: 'var(--fg-green)' }}>{msg}</span>}
       </div>
     </div>
   )
@@ -548,8 +548,8 @@ function PushToggle() {
       disabled={loading}
       title={enabled ? 'Disable push notifications' : 'Enable push notifications'}
       style={{
-        background: enabled ? '#1e4620' : '#313244',
-        color: enabled ? '#a6e3a1' : '#6c7086',
+        background: enabled ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+        color: enabled ? 'var(--fg-green)' : 'var(--text-muted)',
         border: 'none', borderRadius: 8,
         padding: '6px 12px', fontSize: 12, fontWeight: 600,
         cursor: loading ? 'not-allowed' : 'pointer',
@@ -579,18 +579,18 @@ function TabBar({ tab, setTab, followUpCount }) {
   ]
   return (
     <div style={{
-      display: 'flex', gap: 4, background: '#181825',
-      borderBottom: '1px solid #313244', padding: '0 24px',
+      display: 'flex', gap: 4, background: 'var(--bg-header)',
+      borderBottom: '1px solid var(--border)', padding: '0 24px',
     }}>
       {tabs.map(t => (
         <button
           key={t.id}
           onClick={() => setTab(t.id)}
           style={{
-            background: tab === t.id ? '#1e1e2e' : 'transparent',
-            color: tab === t.id ? '#89b4fa' : '#6c7086',
+            background: tab === t.id ? 'var(--bg-surface)' : 'transparent',
+            color: tab === t.id ? 'var(--text-link)' : 'var(--text-muted)',
             border: 'none',
-            borderBottom: tab === t.id ? '2px solid #89b4fa' : '2px solid transparent',
+            borderBottom: tab === t.id ? '2px solid var(--text-link)' : '2px solid transparent',
             padding: '10px 16px',
             fontSize: 13,
             fontWeight: tab === t.id ? 700 : 400,
@@ -659,17 +659,17 @@ function FollowUpMessageModal({ job, onClose }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }} onClick={onClose}>
       <div style={{
-        background: '#1e1e2e', border: '1px solid #313244', borderRadius: 12,
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
         padding: 24, width: 520, maxWidth: '95vw',
       }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 16 }}>Follow-up Message</h3>
-        <div style={{ color: '#6c7086', fontSize: 12, marginBottom: 16 }}>
+        <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 16 }}>Follow-up Message</h3>
+        <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 }}>
           {job.title} at {job.company}
           {source === 'ai' && <span style={{ color: '#8839ef', marginLeft: 8 }}>AI Generated</span>}
           {source === 'template' && <span style={{ color: '#df8e1d', marginLeft: 8 }}>Template (no API key)</span>}
         </div>
         {loading ? (
-          <div style={{ color: '#6c7086', padding: 30, textAlign: 'center' }}>Generating message...</div>
+          <div style={{ color: 'var(--text-muted)', padding: 30, textAlign: 'center' }}>Generating message...</div>
         ) : (
           <>
             <textarea
@@ -677,18 +677,18 @@ function FollowUpMessageModal({ job, onClose }) {
               onChange={e => setMessage(e.target.value)}
               rows={8}
               style={{
-                width: '100%', background: '#313244', border: '1px solid #45475a',
-                borderRadius: 8, padding: '10px 14px', color: '#cdd6f4', fontSize: 13,
+                width: '100%', background: 'var(--bg-surface-alt)', border: '1px solid var(--border-subtle)',
+                borderRadius: 8, padding: '10px 14px', color: 'var(--text-primary)', fontSize: 13,
                 lineHeight: 1.6, resize: 'vertical', boxSizing: 'border-box',
               }}
             />
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
               <button onClick={onClose} style={{
-                background: '#313244', color: '#cdd6f4', border: 'none',
+                background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none',
                 borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13,
               }}>Close</button>
               <button onClick={handleCopy} style={{
-                background: copied ? '#1e4620' : '#1e66f5', color: '#fff', border: 'none',
+                background: copied ? 'var(--bg-green)' : '#1e66f5', color: copied ? 'var(--fg-green)' : '#fff', border: 'none',
                 borderRadius: 8, padding: '8px 18px', fontWeight: 600, cursor: 'pointer', fontSize: 13,
               }}>{copied ? 'Copied!' : 'Copy to Clipboard'}</button>
             </div>
@@ -723,30 +723,30 @@ function FollowUpView({ onStatusChange, onOptimize }) {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18 }}>Follow-up Needed</h2>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Follow-up Needed</h2>
         {jobs.length > 0 && (
-          <span style={{ background: '#3b2c00', color: '#f9e2af', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>
+          <span style={{ background: 'var(--bg-yellow)', color: 'var(--fg-yellow)', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>
             {jobs.length} waiting
           </span>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-          <span style={{ fontSize: 12, color: '#6c7086' }}>No response after</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No response after</span>
           {[3, 5, 7].map(d => (
             <button key={d} onClick={() => setDays(d)} style={{
-              background: days === d ? '#df8e1d' : '#313244',
-              color: days === d ? '#fff' : '#6c7086',
+              background: days === d ? '#df8e1d' : 'var(--bg-surface-alt)',
+              color: days === d ? '#fff' : 'var(--text-muted)',
               border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer', fontWeight: days === d ? 700 : 400,
             }}>{d}d</button>
           ))}
         </div>
       </div>
-      <p style={{ color: '#6c7086', fontSize: 12, margin: '0 0 16px' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
         Jobs you applied to {days}+ days ago with no response. Click <strong style={{ color: '#df8e1d' }}>Draft Message</strong> to generate a follow-up, then mark as <strong style={{ color: '#df8e1d' }}>followed up</strong>.
       </p>
       {loading ? (
-        <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading...</div>
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Loading...</div>
       ) : jobs.length === 0 ? (
-        <div style={{ textAlign: 'center', color: '#45475a', padding: 60, fontSize: 15 }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: 60, fontSize: 15 }}>
           No applications waiting for follow-up.
         </div>
       ) : (
@@ -774,9 +774,9 @@ function FollowUpView({ onStatusChange, onOptimize }) {
 
 // ── History View ───────────────────────────────────────────────────────────
 const STATUS_META = {
-  followed_up: { label: 'Followed Up', color: '#df8e1d', bg: '#3b2c00' },
-  response:    { label: 'Got Response', color: '#40a02b', bg: '#1c2e1c' },
-  rejected:    { label: 'Rejected',     color: '#f38ba8', bg: '#3b1c1c' },
+  followed_up: { label: 'Followed Up', color: '#df8e1d', bg: 'var(--bg-yellow)' },
+  response:    { label: 'Got Response', color: '#40a02b', bg: 'var(--bg-green-deep)' },
+  rejected:    { label: 'Rejected',     color: 'var(--fg-red)', bg: 'var(--bg-red)' },
 }
 
 function HistoryView({ onStatusChange, onOptimize }) {
@@ -810,7 +810,7 @@ function HistoryView({ onStatusChange, onOptimize }) {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18 }}>Application History</h2>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Application History</h2>
         <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
           {[
             { id: 'all', label: `All (${jobs.length})` },
@@ -819,18 +819,18 @@ function HistoryView({ onStatusChange, onOptimize }) {
             { id: 'rejected',    label: `Rejected (${counts.rejected || 0})` },
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)} style={{
-              background: filter === f.id ? '#313244' : 'transparent',
-              color: filter === f.id ? '#cdd6f4' : '#6c7086',
-              border: '1px solid #313244', borderRadius: 6,
+              background: filter === f.id ? 'var(--bg-surface-alt)' : 'transparent',
+              color: filter === f.id ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: '1px solid var(--border)', borderRadius: 6,
               padding: '4px 10px', fontSize: 11, cursor: 'pointer', fontWeight: filter === f.id ? 700 : 400,
             }}>{f.label}</button>
           ))}
         </div>
       </div>
       {loading ? (
-        <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading...</div>
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Loading...</div>
       ) : sorted.length === 0 ? (
-        <div style={{ textAlign: 'center', color: '#45475a', padding: 60, fontSize: 15 }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: 60, fontSize: 15 }}>
           No history yet. Jobs you follow up on, get responses from, or are rejected by will appear here.
         </div>
       ) : (
@@ -877,24 +877,24 @@ function DigestView({ onStatusChange, onOptimize }) {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status } : j))
   }
 
-  if (loading) return <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading digest...</div>
+  if (loading) return <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Loading digest...</div>
 
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18 }}>Today's Digest</h2>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Today's Digest</h2>
         <span style={{
-          background: '#1e4620', color: '#a6e3a1',
+          background: 'var(--bg-green)', color: 'var(--fg-green)',
           fontSize: 12, fontWeight: 700,
           padding: '3px 10px', borderRadius: 99,
         }}>{total} jobs in last 24h</span>
       </div>
-      <p style={{ color: '#6c7086', fontSize: 12, margin: '0 0 16px' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
         Top jobs ranked by your preferences. Update settings to improve results.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {jobs.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#45475a', padding: 40 }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: 40 }}>
             No jobs in the last 24h. Run a collection first!
           </div>
         ) : jobs.map(job => (
@@ -933,8 +933,8 @@ function AddJobModal({ onClose, onAdded }) {
   }
 
   const inputStyle = {
-    width: '100%', background: '#313244', border: '1px solid #45475a',
-    borderRadius: 6, padding: '8px 12px', color: '#cdd6f4', fontSize: 13, boxSizing: 'border-box',
+    width: '100%', background: 'var(--bg-surface-alt)', border: '1px solid var(--border-subtle)',
+    borderRadius: 6, padding: '8px 12px', color: 'var(--text-primary)', fontSize: 13, boxSizing: 'border-box',
   }
 
   return (
@@ -943,10 +943,10 @@ function AddJobModal({ onClose, onAdded }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }} onClick={onClose}>
       <div style={{
-        background: '#1e1e2e', border: '1px solid #313244', borderRadius: 12,
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
         padding: 28, width: 460, maxWidth: '95vw',
       }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: '#cdd6f4', margin: '0 0 20px', fontSize: 17 }}>➕ Add Job Manually</h3>
+        <h3 style={{ color: 'var(--text-primary)', margin: '0 0 20px', fontSize: 17 }}>➕ Add Job Manually</h3>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
             { key: 'title', label: 'Job Title *', placeholder: 'Software Engineer' },
@@ -955,7 +955,7 @@ function AddJobModal({ onClose, onAdded }) {
             { key: 'location', label: 'Location', placeholder: 'Austin, TX / Remote' },
           ].map(({ key, label, placeholder }) => (
             <div key={key}>
-              <label style={{ fontSize: 12, color: '#a6adc8', marginBottom: 4, display: 'block' }}>{label}</label>
+              <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>{label}</label>
               <input
                 value={form[key]}
                 onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
@@ -965,7 +965,7 @@ function AddJobModal({ onClose, onAdded }) {
             </div>
           ))}
           <div>
-            <label style={{ fontSize: 12, color: '#a6adc8', marginBottom: 4, display: 'block' }}>Notes</label>
+            <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>Notes</label>
             <textarea
               value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
@@ -974,10 +974,10 @@ function AddJobModal({ onClose, onAdded }) {
               style={{ ...inputStyle, resize: 'vertical' }}
             />
           </div>
-          {err && <div style={{ color: '#f38ba8', fontSize: 12 }}>{err}</div>}
+          {err && <div style={{ color: 'var(--fg-red)', fontSize: 12 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
             <button type="button" onClick={onClose} style={{
-              background: '#313244', color: '#cdd6f4', border: 'none',
+              background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none',
               borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13,
             }}>Cancel</button>
             <button type="submit" disabled={saving} style={{
@@ -1002,16 +1002,16 @@ function BarChart({ data, labelKey, valueKey, maxValue, color, secondaryKey, sec
         const secPct = secondaryKey ? Math.round(((d[secondaryKey] || 0) / max) * 100) : 0
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 120, fontSize: 12, color: '#a6adc8', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ width: 120, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {formatLabel ? formatLabel(d[labelKey]) : d[labelKey]}
             </div>
-            <div style={{ flex: 1, position: 'relative', height: 20, background: '#313244', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ flex: 1, position: 'relative', height: 20, background: 'var(--bg-surface-alt)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width 0.3s' }} />
               {secondaryKey && secPct > 0 && (
                 <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${secPct}%`, background: secondaryColor || '#40a02b', borderRadius: 4, opacity: 0.7, transition: 'width 0.3s' }} />
               )}
             </div>
-            <div style={{ width: 50, fontSize: 12, color: '#cdd6f4', fontWeight: 600, textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ width: 50, fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, textAlign: 'right', flexShrink: 0 }}>
               {d[valueKey]}{secondaryKey ? ` / ${d[secondaryKey]}` : ''}
             </div>
           </div>
@@ -1042,7 +1042,7 @@ function FunnelChart({ funnel }) {
           : null
         return (
           <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 100, fontSize: 12, color: '#a6adc8', textAlign: 'right', flexShrink: 0 }}>{s.label}</div>
+            <div style={{ width: 100, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'right', flexShrink: 0 }}>{s.label}</div>
             <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
               <div style={{
                 width: `${pct}%`, minWidth: 40,
@@ -1052,7 +1052,7 @@ function FunnelChart({ funnel }) {
                 transition: 'width 0.3s',
               }}>{s.value}</div>
             </div>
-            <div style={{ width: 50, fontSize: 11, color: '#6c7086', flexShrink: 0 }}>
+            <div style={{ width: 50, fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
               {convRate !== null ? `${convRate}%` : ''}
             </div>
           </div>
@@ -1065,11 +1065,11 @@ function FunnelChart({ funnel }) {
 function MiniStat({ label, value, unit, color }) {
   return (
     <div style={{
-      background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10,
+      background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
       padding: '16px 20px', flex: '1 1 150px', minWidth: 140,
     }}>
-      <div style={{ fontSize: 28, fontWeight: 700, color: color || '#cdd6f4' }}>{value ?? '—'}{unit && <span style={{ fontSize: 14, fontWeight: 400, color: '#6c7086' }}> {unit}</span>}</div>
-      <div style={{ fontSize: 12, color: '#6c7086', marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: color || 'var(--text-primary)' }}>{value ?? '—'}{unit && <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}> {unit}</span>}</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{label}</div>
     </div>
   )
 }
@@ -1094,8 +1094,8 @@ function AnalyticsView() {
     load()
   }, [days])
 
-  if (loading) return <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading analytics...</div>
-  if (!data) return <div style={{ color: '#f38ba8', padding: 40, textAlign: 'center' }}>Failed to load analytics.</div>
+  if (loading) return <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Loading analytics...</div>
+  if (!data) return <div style={{ color: 'var(--fg-red)', padding: 40, textAlign: 'center' }}>Failed to load analytics.</div>
 
   const totalApplied = data.funnel?.applied || 0
   const totalResponses = data.funnel?.response || 0
@@ -1109,12 +1109,12 @@ function AnalyticsView() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18 }}>Application Analytics</h2>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Application Analytics</h2>
         <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
           {[7, 14, 30, 60].map(d => (
             <button key={d} onClick={() => setDays(d)} style={{
-              background: days === d ? '#1e66f5' : '#313244',
-              color: days === d ? '#fff' : '#6c7086',
+              background: days === d ? '#1e66f5' : 'var(--bg-surface-alt)',
+              color: days === d ? '#fff' : 'var(--text-muted)',
               border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: days === d ? 700 : 400,
             }}>{d}d</button>
           ))}
@@ -1131,133 +1131,133 @@ function AnalyticsView() {
       </div>
 
       {/* Funnel */}
-      <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20, marginBottom: 20 }}>
-        <h3 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 15 }}>Conversion Funnel</h3>
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ color: 'var(--text-primary)', margin: '0 0 16px', fontSize: 15 }}>Conversion Funnel</h3>
         <FunnelChart funnel={data.funnel} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16, marginBottom: 20 }}>
         {/* Response Rate by Source */}
-        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
-          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Source</h3>
-          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Which ATS platforms get the most callbacks?</p>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Source</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Which ATS platforms get the most callbacks?</p>
           {data.by_source?.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {data.by_source.map(s => (
                 <div key={s.ats_source}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, color: '#cdd6f4', fontWeight: 600, textTransform: 'capitalize' }}>{s.ats_source}</span>
-                    <span style={{ fontSize: 12, color: s.rate > 0 ? '#a6e3a1' : '#6c7086' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, textTransform: 'capitalize' }}>{s.ats_source}</span>
+                    <span style={{ fontSize: 12, color: s.rate > 0 ? 'var(--fg-green)' : 'var(--text-muted)' }}>
                       {s.responses}/{s.applied} ({s.rate}%)
                     </span>
                   </div>
-                  <div style={{ height: 6, background: '#313244', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: 6, background: 'var(--bg-surface-alt)', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 3, transition: 'width 0.3s',
                       width: `${Math.max(2, s.rate)}%`,
-                      background: s.rate >= 15 ? '#a6e3a1' : s.rate >= 5 ? '#f9e2af' : '#585b70',
+                      background: s.rate >= 15 ? '#a6e3a1' : s.rate >= 5 ? '#f9e2af' : 'var(--text-faint)',
                     }} />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet. Start applying to see conversion rates.</div>
+            <div style={{ color: 'var(--text-empty)', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet. Start applying to see conversion rates.</div>
           )}
         </div>
 
         {/* Response Rate by Title */}
-        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
-          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Job Title</h3>
-          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Which roles get the most callbacks?</p>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>Response Rate by Job Title</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Which roles get the most callbacks?</p>
           {data.by_title?.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {data.by_title.map(t => (
                 <div key={t.title}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, color: '#cdd6f4', fontWeight: 600 }}>{t.title}</span>
-                    <span style={{ fontSize: 12, color: t.rate > 0 ? '#a6e3a1' : '#6c7086' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>{t.title}</span>
+                    <span style={{ fontSize: 12, color: t.rate > 0 ? 'var(--fg-green)' : 'var(--text-muted)' }}>
                       {t.responses}/{t.applied} ({t.rate}%)
                     </span>
                   </div>
-                  <div style={{ height: 6, background: '#313244', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: 6, background: 'var(--bg-surface-alt)', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 3, transition: 'width 0.3s',
                       width: `${Math.max(2, t.rate)}%`,
-                      background: t.rate >= 15 ? '#a6e3a1' : t.rate >= 5 ? '#f9e2af' : '#585b70',
+                      background: t.rate >= 15 ? '#a6e3a1' : t.rate >= 5 ? '#f9e2af' : 'var(--text-faint)',
                     }} />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet.</div>
+            <div style={{ color: 'var(--text-empty)', fontSize: 13, padding: 20, textAlign: 'center' }}>No application data yet.</div>
           )}
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16, marginBottom: 20 }}>
         {/* Easy vs Hard Apply */}
-        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
-          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Easy Apply vs Hard Apply</h3>
-          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Greenhouse/Lever/Ashby (easy) vs Workday/others (hard)</p>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>Easy Apply vs Hard Apply</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Greenhouse/Lever/Ashby (easy) vs Workday/others (hard)</p>
           {data.difficulty_analysis?.length > 0 ? (
             <div style={{ display: 'flex', gap: 16 }}>
               {data.difficulty_analysis.map(d => (
                 <div key={d.difficulty} style={{
-                  flex: 1, background: '#181825', borderRadius: 8, padding: 16, textAlign: 'center',
-                  border: `1px solid ${d.difficulty === 'easy' ? '#1e4620' : '#3b2c00'}`,
+                  flex: 1, background: 'var(--bg-surface-deep)', borderRadius: 8, padding: 16, textAlign: 'center',
+                  border: `1px solid ${d.difficulty === 'easy' ? '#40a02b' : '#df8e1d'}`,
                 }}>
-                  <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
                     {d.difficulty === 'easy' ? 'Easy Apply' : 'Hard Apply'}
                   </div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: d.difficulty === 'easy' ? '#a6e3a1' : '#f9e2af' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: d.difficulty === 'easy' ? 'var(--fg-green)' : 'var(--fg-yellow)' }}>
                     {d.rate}%
                   </div>
-                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                     {d.responses} / {d.applied} apps
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
+            <div style={{ color: 'var(--text-empty)', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
           )}
         </div>
 
         {/* OPT-friendly analysis */}
-        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
-          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>OPT-Friendly vs Others</h3>
-          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Do known OPT sponsors respond more?</p>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>OPT-Friendly vs Others</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Do known OPT sponsors respond more?</p>
           {data.opt_analysis?.length > 0 ? (
             <div style={{ display: 'flex', gap: 16 }}>
               {data.opt_analysis.map(d => (
                 <div key={String(d.opt_friendly)} style={{
-                  flex: 1, background: '#181825', borderRadius: 8, padding: 16, textAlign: 'center',
-                  border: `1px solid ${d.opt_friendly ? '#1e4620' : '#313244'}`,
+                  flex: 1, background: 'var(--bg-surface-deep)', borderRadius: 8, padding: 16, textAlign: 'center',
+                  border: `1px solid ${d.opt_friendly ? '#40a02b' : 'var(--border)'}`,
                 }}>
-                  <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
                     {d.opt_friendly ? 'OPT Friendly' : 'Other Companies'}
                   </div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: d.opt_friendly ? '#a6e3a1' : '#cdd6f4' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: d.opt_friendly ? 'var(--fg-green)' : 'var(--text-primary)' }}>
                     {d.rate}%
                   </div>
-                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                     {d.responses} / {d.applied} apps
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ color: '#45475a', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
+            <div style={{ color: 'var(--text-empty)', fontSize: 13, padding: 20, textAlign: 'center' }}>No data yet.</div>
           )}
         </div>
       </div>
 
       {/* Daily Applications Timeline */}
-      <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20, marginBottom: 20 }}>
-        <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Daily Applications</h3>
-        <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Applications submitted per day</p>
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 20 }}>
+        <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>Daily Applications</h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Applications submitted per day</p>
         {data.apps_per_day?.length > 0 ? (
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 120, padding: '0 4px' }}>
             {data.apps_per_day.map((d, i) => {
@@ -1265,13 +1265,13 @@ function AnalyticsView() {
               const h = Math.max(4, Math.round((d.count / max) * 100))
               return (
                 <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <span style={{ fontSize: 9, color: '#a6adc8', fontWeight: 600 }}>{d.count}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-secondary)', fontWeight: 600 }}>{d.count}</span>
                   <div style={{
                     width: '100%', maxWidth: 28, height: `${h}%`, minHeight: 4,
                     background: '#1e66f5', borderRadius: '3px 3px 0 0',
                     transition: 'height 0.3s',
                   }} />
-                  <span style={{ fontSize: 8, color: '#585b70', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 8, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
                     {new Date(d.day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </span>
                 </div>
@@ -1279,7 +1279,7 @@ function AnalyticsView() {
             })}
           </div>
         ) : (
-          <div style={{ color: '#45475a', fontSize: 13, padding: 30, textAlign: 'center' }}>
+          <div style={{ color: 'var(--text-empty)', fontSize: 13, padding: 30, textAlign: 'center' }}>
             No application data yet. Apply to some jobs first!
           </div>
         )}
@@ -1287,9 +1287,9 @@ function AnalyticsView() {
 
       {/* Weekly Velocity */}
       {data.weekly_velocity?.length > 1 && (
-        <div style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: 10, padding: 20 }}>
-          <h3 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 15 }}>Weekly Velocity</h3>
-          <p style={{ color: '#6c7086', fontSize: 11, margin: '0 0 14px' }}>Are you ramping up or slowing down?</p>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 15 }}>Weekly Velocity</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '0 0 14px' }}>Are you ramping up or slowing down?</p>
           <BarChart
             data={data.weekly_velocity}
             labelKey="week"
@@ -1300,6 +1300,18 @@ function AnalyticsView() {
         </div>
       )}
     </div>
+  )
+}
+
+// ── Theme Toggle ───────────────────────────────────────────────────────────
+function ThemeToggle({ dark, onToggle }) {
+  return (
+    <button className="theme-toggle" onClick={onToggle} title="Toggle dark/light mode">
+      <span>{dark ? '🌙' : '☀️'}</span>
+      <div className="theme-toggle-track">
+        <div className="theme-toggle-thumb" style={{ left: dark ? 1 : 15 }} />
+      </div>
+    </button>
   )
 }
 
@@ -1320,6 +1332,13 @@ export default function App() {
   const [scoreMsg, setScoreMsg] = useState('')
   const [followUpCount, setFollowUpCount] = useState(0)
   const [showAddJob, setShowAddJob] = useState(false)
+  const [dark, setDark] = useState(() => localStorage.getItem('theme') !== 'light')
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  }, [dark])
+
   const [filters, setFilters] = useState({
     status: '',
     ats_source: '',
@@ -1487,20 +1506,20 @@ export default function App() {
   const bsrc = stats?.by_source || {}
 
   return (
-    <div style={{ minHeight: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'system-ui, sans-serif' }}>
       {/* Header */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 100,
-        background: '#181825', borderBottom: '1px solid #313244',
+        background: 'var(--bg-header)', borderBottom: '1px solid var(--border)',
         padding: '12px 24px',
         display: 'flex', alignItems: 'center', gap: 16,
       }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: '#89b4fa' }}>🎯 Job Tracker</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-link)' }}>🎯 Job Tracker</div>
         <div style={{ flex: 1 }} />
         {/* Global Resume Upload */}
         <label style={{
-          background: resumeInfo ? '#1e4620' : '#313244',
-          color: resumeInfo ? '#a6e3a1' : '#cdd6f4',
+          background: resumeInfo ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+          color: resumeInfo ? 'var(--fg-green)' : 'var(--text-primary)',
           border: 'none', borderRadius: 8,
           padding: '6px 14px', fontSize: 12, fontWeight: 600,
           cursor: scoring ? 'not-allowed' : 'pointer',
@@ -1521,23 +1540,24 @@ export default function App() {
             onClick={handleScoreAll}
             disabled={scoring}
             style={{
-              background: scoring ? '#313244' : '#8839ef',
+              background: scoring ? 'var(--bg-surface-alt)' : '#8839ef',
               color: '#fff', border: 'none', borderRadius: 8,
               padding: '6px 14px', fontSize: 12, fontWeight: 600,
               cursor: scoring ? 'not-allowed' : 'pointer',
             }}
           >{scoring ? 'Scoring...' : '🎯 Score All'}</button>
         )}
-        {scoreMsg && <span style={{ fontSize: 11, color: '#a6e3a1' }}>{scoreMsg}</span>}
+        {scoreMsg && <span style={{ fontSize: 11, color: 'var(--fg-green)' }}>{scoreMsg}</span>}
         <PushToggle />
+        <ThemeToggle dark={dark} onToggle={() => setDark(d => !d)} />
         {lastRun && (
-          <div style={{ fontSize: 12, color: '#6c7086' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             Last run: {timeAgo(lastRun.finished_at)} · {lastRun.jobs_new} new
           </div>
         )}
         {stats && (
           <div style={{
-            background: '#1e4620', color: '#a6e3a1',
+            background: 'var(--bg-green)', color: 'var(--fg-green)',
             fontSize: 12, fontWeight: 700,
             padding: '4px 12px', borderRadius: 99,
           }}>
@@ -1548,7 +1568,7 @@ export default function App() {
           onClick={handleCollect}
           disabled={collecting}
           style={{
-            background: collecting ? '#313244' : '#1e66f5',
+            background: collecting ? 'var(--bg-surface-alt)' : '#1e66f5',
             color: '#fff',
             border: 'none',
             borderRadius: 8,
@@ -1564,7 +1584,7 @@ export default function App() {
           onClick={handleJSearchCollect}
           disabled={jsearchCollecting || collecting}
           style={{
-            background: jsearchCollecting ? '#313244' : '#40a02b',
+            background: jsearchCollecting ? 'var(--bg-surface-alt)' : '#40a02b',
             color: '#fff',
             border: 'none',
             borderRadius: 8,
@@ -1606,7 +1626,7 @@ export default function App() {
         {/* Settings Tab */}
         {tab === 'prefs' && (
           <div>
-            <h2 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 18 }}>Settings</h2>
+            <h2 style={{ color: 'var(--text-primary)', margin: '0 0 16px', fontSize: 18 }}>Settings</h2>
             <PreferencesPanel prefs={prefs} onSave={(updated) => setPrefs(updated)} />
           </div>
         )}
@@ -1635,7 +1655,7 @@ export default function App() {
             {/* Filter Bar (hidden on Saved/Applied since status is locked) */}
             <div style={{
               display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
-              background: '#1e1e2e', border: '1px solid #313244',
+              background: 'var(--bg-surface)', border: '1px solid var(--border)',
               borderRadius: 10, padding: '10px 14px', marginBottom: 16,
             }}>
               <input
@@ -1643,8 +1663,8 @@ export default function App() {
                 value={filters.search}
                 onChange={e => setFilter('search', e.target.value)}
                 style={{
-                  flex: '2 1 200px', background: '#313244', border: 'none', borderRadius: 6,
-                  padding: '6px 12px', color: '#cdd6f4', fontSize: 13,
+                  flex: '2 1 200px', background: 'var(--bg-surface-alt)', border: 'none', borderRadius: 6,
+                  padding: '6px 12px', color: 'var(--text-primary)', fontSize: 13,
                 }}
               />
               {tab === 'all' && (
@@ -1652,8 +1672,8 @@ export default function App() {
                   value={filters.status}
                   onChange={e => setFilter('status', e.target.value)}
                   style={{
-                    flex: '1 1 110px', background: '#313244', border: 'none', borderRadius: 6,
-                    padding: '6px 10px', color: '#cdd6f4', fontSize: 13,
+                    flex: '1 1 110px', background: 'var(--bg-surface-alt)', border: 'none', borderRadius: 6,
+                    padding: '6px 10px', color: 'var(--text-primary)', fontSize: 13,
                   }}
                 >
                   {['', 'new', 'saved', 'queued', 'applied', 'followed_up', 'response', 'rejected', 'archived'].map(o => (
@@ -1672,8 +1692,8 @@ export default function App() {
                   value={filters[key]}
                   onChange={e => setFilter(key, e.target.value)}
                   style={{
-                    flex: '1 1 110px', background: '#313244', border: 'none', borderRadius: 6,
-                    padding: '6px 10px', color: '#cdd6f4', fontSize: 13,
+                    flex: '1 1 110px', background: 'var(--bg-surface-alt)', border: 'none', borderRadius: 6,
+                    padding: '6px 10px', color: 'var(--text-primary)', fontSize: 13,
                   }}
                 >
                   {options.map(o => (
@@ -1686,9 +1706,9 @@ export default function App() {
               <button
                 onClick={() => setFilter('entry_only', filters.entry_only === 'true' ? '' : 'true')}
                 style={{
-                  background: filters.entry_only === 'true' ? '#1e4620' : '#313244',
-                  color: filters.entry_only === 'true' ? '#a6e3a1' : '#6c7086',
-                  border: filters.entry_only === 'true' ? '1px solid #40a02b' : '1px solid #45475a',
+                  background: filters.entry_only === 'true' ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+                  color: filters.entry_only === 'true' ? 'var(--fg-green)' : 'var(--text-muted)',
+                  border: filters.entry_only === 'true' ? '1px solid #40a02b' : '1px solid var(--border)',
                   borderRadius: 6,
                   padding: '6px 12px',
                   fontSize: 12,
@@ -1701,8 +1721,8 @@ export default function App() {
                 value={filters.sort}
                 onChange={e => setFilter('sort', e.target.value)}
                 style={{
-                  flex: '1 1 140px', background: '#313244', border: 'none', borderRadius: 6,
-                  padding: '6px 10px', color: '#cdd6f4', fontSize: 13,
+                  flex: '1 1 140px', background: 'var(--bg-surface-alt)', border: 'none', borderRadius: 6,
+                  padding: '6px 10px', color: 'var(--text-primary)', fontSize: 13,
                 }}
               >
                 <option value="">Sort: Newest</option>
@@ -1712,7 +1732,7 @@ export default function App() {
               <button
                 onClick={clearFilters}
                 style={{
-                  background: '#313244', color: '#a6adc8', border: 'none',
+                  background: 'var(--bg-surface-alt)', color: 'var(--text-secondary)', border: 'none',
                   borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12,
                 }}
               >Clear</button>
@@ -1724,7 +1744,7 @@ export default function App() {
                 <button
                   onClick={() => setShowAddJob(true)}
                   style={{
-                    background: '#1e4620', color: '#a6e3a1', border: '1px solid #40a02b',
+                    background: 'var(--bg-green)', color: 'var(--fg-green)', border: '1px solid #40a02b',
                     borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
                   }}
                 >➕ Add Job Manually</button>
@@ -1733,7 +1753,7 @@ export default function App() {
 
             {/* Results count + pagination */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontSize: 13, color: '#6c7086' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                 {total} job{total !== 1 ? 's' : ''} found
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -1741,19 +1761,19 @@ export default function App() {
                   onClick={() => setOffset(Math.max(0, offset - LIMIT))}
                   disabled={offset === 0}
                   style={{
-                    background: '#313244', color: offset === 0 ? '#45475a' : '#cdd6f4',
+                    background: 'var(--bg-surface-alt)', color: offset === 0 ? 'var(--text-empty)' : 'var(--text-primary)',
                     border: 'none', borderRadius: 6, padding: '5px 12px',
                     cursor: offset === 0 ? 'default' : 'pointer', fontSize: 12,
                   }}
                 >← Prev</button>
-                <span style={{ fontSize: 12, color: '#6c7086', alignSelf: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>
                   {Math.floor(offset / LIMIT) + 1} / {Math.max(1, Math.ceil(total / LIMIT))}
                 </span>
                 <button
                   onClick={() => setOffset(offset + LIMIT)}
                   disabled={offset + LIMIT >= total}
                   style={{
-                    background: '#313244', color: offset + LIMIT >= total ? '#45475a' : '#cdd6f4',
+                    background: 'var(--bg-surface-alt)', color: offset + LIMIT >= total ? 'var(--text-empty)' : 'var(--text-primary)',
                     border: 'none', borderRadius: 6, padding: '5px 12px',
                     cursor: offset + LIMIT >= total ? 'default' : 'pointer', fontSize: 12,
                   }}
@@ -1764,7 +1784,7 @@ export default function App() {
             {/* Job List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {jobs.length === 0 ? (
-                <div style={{ textAlign: 'center', color: '#45475a', padding: '60px 0', fontSize: 15 }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: '60px 0', fontSize: 15 }}>
                   {tab === 'saved' ? 'No saved jobs yet. Mark jobs as saved to see them here.' :
                    tab === 'applied' ? 'No applied jobs yet. Track your applications here.' :
                    'No jobs found. Click "Collect Now" to start fetching jobs.'}
@@ -1777,7 +1797,7 @@ export default function App() {
         )}
 
         {/* Footer */}
-        <div style={{ textAlign: 'center', color: '#313244', fontSize: 11, padding: '40px 0 20px' }}>
+        <div style={{ textAlign: 'center', color: 'var(--border)', fontSize: 11, padding: '40px 0 20px' }}>
           Job Tracker · Auto-refreshes every 6h · {stats ? `${(bs.new || 0) + (bs.saved || 0) + (bs.applied || 0)}` : '0'} total jobs tracked
         </div>
       </div>

@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>Job Tracker</title>
+    <script>
+      // Apply theme before paint to avoid flash
+      document.documentElement.setAttribute(
+        'data-theme',
+        localStorage.getItem('theme') === 'light' ? 'light' : 'dark'
+      )
+    </script>
   </head>
   <body>
     <div id="root"></div>
