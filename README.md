@@ -50,53 +50,6 @@ Job Tracker automatically scrapes job postings from **Greenhouse, Lever, Ashby, 
 
 ---
 
-## 🗂️ Project Structure
-
-```
-job_automation/
-├── backend/
-│   ├── .env.example           # Required environment variables
-│   ├── src/
-│   │   ├── index.ts           # Entry point — init DB, start server + scheduler
-│   │   ├── orchestrator.ts    # Runs all collectors, deduplicates, inserts to DB
-│   │   ├── scheduler.ts       # node-cron — runs every 6 hours
-│   │   ├── scoring.ts         # Relevance scoring (keyword + allow/block lists)
-│   │   ├── resume.ts          # Local ATS resume scorer (4-metric, no API)
-│   │   ├── push.ts            # Web Push daily digest notifications
-│   │   ├── db/
-│   │   │   ├── schema.ts      # TypeScript interfaces / DB types
-│   │   │   └── database.ts    # SQLite singleton
-│   │   ├── collectors/
-│   │   │   ├── filters.ts     # Title / seniority / remote / location detection
-│   │   │   ├── greenhouse.ts  # ~65 companies
-│   │   │   ├── lever.ts       # ~60 companies
-│   │   │   ├── ashby.ts       # ~60 AI & startup companies
-│   │   │   ├── workday.ts     # ~32 large enterprises
-│   │   │   ├── smartrecruiters.ts
-│   │   │   ├── workable.ts
-│   │   │   ├── jsearch.ts     # RapidAPI JSearch (optional)
-│   │   │   ├── normalizers.ts # Unified job shape
-│   │   │   └── index.ts       # Promise.allSettled fan-out
-│   │   └── api/
-│   │       ├── routes.ts      # All REST endpoints
-│   │       └── server.ts      # Fastify + CORS setup
-│   └── jobs.db                # Auto-created on first run
-├── frontend/
-│   └── src/
-│       ├── App.jsx            # Main dashboard UI
-│       └── ResumeOptimizer.jsx
-├── chrome-extension/
-│   ├── manifest.json          # MV3 manifest
-│   └── src/
-│       ├── background.js      # Service worker
-│       ├── content.js         # DOM auto-fill logic
-│       ├── popup.js           # Extension popup
-│       └── load-profile.js
-└── docs/                      # Screenshots used in this README
-```
-
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
