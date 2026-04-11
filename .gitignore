@@ -19,15 +19,10 @@ frontend/dist
 # OS
 .DS_Store
 
+# Personal writing sample used for AI voice matching
+Priyabrata_Writing.txt
 
-
-priyabrata_Writing.txt
-
-
+# Internal tooling
 .code-review-graph
-
 .superpowers
-
 docs/superpowers
-
-Todo.md
