@@ -138,8 +138,6 @@ cd frontend
 npm run dev
 ```
 
-Open **http://localhost:3000** in your browser.
-
 The backend will start an immediate collection run on startup and then repeat every 6 hours automatically.
 
 ---
