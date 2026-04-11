@@ -19,8 +19,15 @@ frontend/dist
 # OS
 .DS_Store
 
-Todo2.md
-Extension-Todo.md
 
 
 priyabrata_Writing.txt
+
+
+.code-review-graph
+
+.superpowers
+
+docs/superpowers
+
+Todo.md

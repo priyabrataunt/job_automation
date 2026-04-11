@@ -207,8 +207,10 @@ export default function ResumeOptimizer({ job, onClose }) {
       overflowY: 'auto', padding: '20px 0',
     }}>
       <div style={{
-        background: 'var(--bg-base)', borderRadius: 14, width: '100%', maxWidth: 720,
+        background: 'var(--bg-header)', border: '1px solid var(--border)',
+        borderRadius: 14, width: '100%', maxWidth: 720,
         margin: 'auto', padding: 0, maxHeight: '95vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
       }}>
         {/* Header */}
         <div style={{
