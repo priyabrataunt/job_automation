@@ -12,15 +12,37 @@ import { resolve } from 'path';
 // Load writing-style reference so AI outputs sound like the user
 let writingStylePrompt = '';
 try {
-  const sample = readFileSync(resolve(__dirname, '../../../Priyabrata_Writing.txt'), 'utf-8').trim();
-  writingStylePrompt = `## Writing Style Reference
-Below are real writing samples from the candidate. When generating ANY text (cover letters, form answers, follow-up messages), match this person's natural voice — their sentence structure, word choices, level of formality, and tone. Do NOT copy the content; copy the style.
+  const personaDir = resolve(__dirname, '../../../Priyabrata_persona');
 
-${sample}
+  const writing = JSON.parse(readFileSync(resolve(personaDir, 'Priyabrata_Writing.json'), 'utf-8'));
+  const questions: string[] = JSON.parse(readFileSync(resolve(personaDir, 'user_questions.json'), 'utf-8'));
 
-IMPORTANT: Write in this person's voice. Keep it natural and human — not overly polished or robotic.`;
+  // Pick a representative sample of questions (first 20) to keep token count reasonable
+  const questionSample = questions.slice(0, 20).map((q, i) => `${i + 1}. ${q}`).join('\n');
+
+  writingStylePrompt = `## Persona & Writing Style Reference
+You are writing on behalf of this specific person. Study the samples below carefully and match their exact voice — informal phrasing, sentence rhythm, directness, and energy. Do NOT produce polished corporate text. Write the way this person actually writes.
+
+### Diary / Personal Writing
+${writing.diary_entry}
+
+### Social Media Posts
+${writing.social_media_posts.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}
+
+### Outreach / Approach Messages
+${writing.approach_messages.map((m: string, i: number) => `${i + 1}. ${m}`).join('\n')}
+
+### Email Messages
+${writing.email_messages.map((e: string, i: number) => `${i + 1}. ${e}`).join('\n')}
+
+### Questions This Person Asks (captures their curiosity, phrasing, and thought style)
+${questionSample}
+
+IMPORTANT: Write ONLY in this person's voice. Keep it natural, direct, and human — not overly polished or robotic. Mirror their sentence structure and word choices.`;
+
+  console.log('[routes] Loaded persona from Priyabrata_persona/ folder');
 } catch (err) {
-  console.warn('[routes] Could not load Priyabrata_Writing.txt — AI will use default voice');
+  console.warn('[routes] Could not load Priyabrata_persona/ — AI will use default voice', err);
 }
 
 const SPONSOR_POSITIVE = [

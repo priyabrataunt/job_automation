@@ -1,35 +1,30 @@
 {
   "_comment": "Fill in your details here. This file is read by the extension for auto-fill.",
   "personal": {
-    "name": "dsdsf",
-    "email": "fdsfs@gmail.com",
-    "phone": "940-344-5555",
+    "name": "Priyabrata Behera",
+    "email": "pbehera.tech@gmail.com",
+    "phone": "630-534-0344",
     "address": {
       "city": "Denton",
       "state": "TX",
       "zip": "76201",
       "country": "United States"
     },
-    "linkedin": "https://linkedin.com/in/yourprofile",
-    "github": "https://github.com/yourusername",
-    "portfolio": "https://yourportfolio.com"
+    "linkedin": "https://www.linkedin.com/in/beherapriyabrata/",
+    "github": "https://github.com/priyabrataunt",
+    "portfolio": "NA"
   },
   "visa": {
     "status": "F1-OPT",
     "authorized": true,
     "sponsorship_required": false,
-    "graduation_date": "2025-05",
-    "opt_expiry": "2026-05"
+    "graduation_date": "2026-05",
+    "opt_expiry": "2027-05"
   },
   "work_auth_answers": {
     "authorized_to_work": "Yes",
     "require_sponsorship_now": "No",
-    "require_sponsorship_future": "Yes"
-  },
-  "resume_variants": {
-    "default": "resume_v3.pdf",
-    "swe": "resume_swe.pdf",
-    "data": "resume_data.pdf"
+    "require_sponsorship_future": "No"
   },
   "answers": {
     "salary_expectation": "90000",
@@ -38,6 +33,5 @@
     "highest_education": "Master's Degree",
     "degree_field": "Computer Science",
     "pronouns": "He/Him"
-  },
-  "job_tracker_url": "http://localhost:8000"
+  }
 }

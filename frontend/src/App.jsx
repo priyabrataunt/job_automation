@@ -351,9 +351,25 @@ function JobCard({ job, onStatusChange, onOptimize }) {
           >{STATUS_LABELS[s] || s}</button>
         ))}
         <button
-          onClick={() => onOptimize(job)}
+          onClick={() => {
+            const encoded = encodeURIComponent(job.description || job.description_snippet || '')
+            window.open(`http://localhost:5174?jd=${encoded}`, '_blank')
+          }}
           style={{
             marginLeft: 'auto',
+            background: '#4f46e5',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            padding: '4px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >✨ Optimize Resume</button>
+        <button
+          onClick={() => onOptimize(job)}
+          style={{
             background: '#8839ef',
             color: '#fff',
             border: 'none',
