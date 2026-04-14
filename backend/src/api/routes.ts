@@ -642,9 +642,10 @@ ${jdText.slice(0, 4000)}`,
       return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
     }
 
-    const { fields, profile } = request.body as {
+    const { fields, profile, jobDescription } = request.body as {
       fields: Array<{ label: string; type: string; options?: string[] }>;
       profile: Record<string, any>;
+      jobDescription?: string;
     };
 
     if (!fields?.length) {
@@ -663,6 +664,10 @@ ${jdText.slice(0, 4000)}`,
     const resumeRow = db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
     const resumeSection = resumeRow?.resume_text
       ? `\n## Candidate Resume\n${resumeRow.resume_text.slice(0, 3000)}\n`
+      : '';
+
+    const jdSection = jobDescription?.trim()
+      ? `\n## Job Description\n${jobDescription.slice(0, 2000)}\n`
       : '';
 
     const prompt = `You are filling out a job application form on behalf of a candidate.
@@ -685,7 +690,7 @@ Highest education: ${answers.highest_education || ''} in ${answers.degree_field 
 Salary expectation: $${answers.salary_expectation || ''}
 Notice period: ${answers.notice_period || ''}
 Pronouns: ${answers.pronouns || ''}
-${resumeSection}
+${resumeSection}${jdSection}
 ## Form Fields to Fill
 ${JSON.stringify(cappedFields, null, 2)}
 
