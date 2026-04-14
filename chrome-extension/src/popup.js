@@ -77,15 +77,22 @@ async function markApplied(profile, tabUrl) {
 
 // ── Generate cover letter via backend (uses ANTHROPIC_API_KEY server-side) ───
 
-async function generateCoverLetter(profile, jobId) {
+async function generateCoverLetter(profile, jobId, jobDescription) {
   if (!profile?.job_tracker_url) {
     showMsg('job_tracker_url not set in profile.json', true);
+    return null;
+  }
+  if (!jobId && !jobDescription) {
+    showMsg('Paste a job description first, or open the application from Job Tracker.', true);
     return null;
   }
   const res = await fetch(`${profile.job_tracker_url}/api/cover-letter`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId }),
+    body: JSON.stringify({
+      jobId: jobId || undefined,
+      jobDescription: jobDescription || undefined,
+    }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Generation failed');
@@ -102,6 +109,98 @@ async function generateCoverLetter(profile, jobId) {
     showMsg('Load your profile.json first (see README).', true);
     return;
   }
+
+  // ── JD context state ────────────────────────────────────────────────────────
+  const storedJd = await new Promise(resolve => {
+    chrome.storage.local.get(['jdText', 'jdJobId', 'jdCompany', 'jdTitle'], data => resolve(data));
+  });
+  let jdText = storedJd.jdText || '';
+  let jdJobId = storedJd.jdJobId || null;
+  let jdCompany = storedJd.jdCompany || '';
+  let jdTitle = storedJd.jdTitle || '';
+  let jdExpanded = !!jdText;
+
+  function renderJdState() {
+    if (jdText) {
+      $('jd-badge').style.display = 'flex';
+      $('jd-badge-text').textContent = jdJobId && jdCompany
+        ? `JD loaded ✓ — ${jdCompany} · ${jdTitle}`
+        : 'JD loaded ✓';
+      $('jd-input-area').style.display = 'block';
+      $('jd-text').value = jdText;
+      $('btn-add-tracker').disabled = !!jdJobId;
+      $('btn-add-tracker').textContent = jdJobId ? '✓ Added to Tracker' : '📋 Add to Tracker';
+      $('jd-toggle').textContent = '▲ Hide';
+    } else {
+      $('jd-badge').style.display = 'none';
+      $('jd-input-area').style.display = jdExpanded ? 'block' : 'none';
+      $('jd-toggle').textContent = jdExpanded ? '▲ Hide' : '▼ Paste JD';
+      $('btn-add-tracker').disabled = true;
+      $('btn-add-tracker').textContent = '📋 Add to Tracker';
+    }
+  }
+
+  renderJdState();
+
+  // ── JD toggle ──
+  $('jd-toggle').addEventListener('click', () => {
+    jdExpanded = !jdExpanded;
+    $('jd-input-area').style.display = jdExpanded ? 'block' : 'none';
+    $('jd-toggle').textContent = jdExpanded ? '▲ Hide' : '▼ Paste JD';
+  });
+
+  // ── JD textarea ──
+  $('jd-text').addEventListener('input', () => {
+    jdText = $('jd-text').value;
+    chrome.storage.local.set({ jdText });
+    const hasText = !!jdText.trim();
+    $('jd-badge').style.display = hasText ? 'flex' : 'none';
+    if (hasText && !jdJobId) $('jd-badge-text').textContent = 'JD loaded ✓';
+    $('btn-add-tracker').disabled = !hasText || !!jdJobId;
+  });
+
+  // ── Add to Tracker ──
+  $('btn-add-tracker').addEventListener('click', async () => {
+    if (!jdText.trim() || !profile?.job_tracker_url) return;
+    $('btn-add-tracker').disabled = true;
+    $('btn-add-tracker').textContent = 'Adding...';
+    try {
+      const res = await fetch(`${profile.job_tracker_url}/api/jobs/from-jd`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jdText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add job');
+      jdJobId = data.jobId;
+      jdCompany = data.company;
+      jdTitle = data.title;
+      chrome.storage.local.set({ jdJobId, jdCompany, jdTitle });
+      $('jd-badge-text').textContent = `JD loaded ✓ — ${jdCompany} · ${jdTitle}`;
+      $('btn-add-tracker').textContent = '✓ Added to Tracker';
+      showMsg(`Added "${jdTitle}" at ${jdCompany} to tracker!`);
+    } catch (e) {
+      $('btn-add-tracker').disabled = false;
+      $('btn-add-tracker').textContent = '📋 Add to Tracker';
+      showMsg(e.message || 'Failed to add to tracker', true);
+    }
+  });
+
+  // ── Clear JD ──
+  $('jd-clear').addEventListener('click', () => {
+    jdText = '';
+    jdJobId = null;
+    jdCompany = '';
+    jdTitle = '';
+    jdExpanded = false;
+    chrome.storage.local.remove(['jdText', 'jdJobId', 'jdCompany', 'jdTitle']);
+    $('jd-text').value = '';
+    $('jd-badge').style.display = 'none';
+    $('jd-input-area').style.display = 'none';
+    $('jd-toggle').textContent = '▼ Paste JD';
+    $('btn-add-tracker').disabled = true;
+    $('btn-add-tracker').textContent = '📋 Add to Tracker';
+  });
 
   const page = await detectPage();
   const ats = page?.ats || 'Unknown';
@@ -125,7 +224,7 @@ async function generateCoverLetter(profile, jobId) {
       await new Promise(r => setTimeout(r, 50));
       $('btn-autofill').textContent = 'Filling... (AI may take ~10s)';
 
-      const result = await chrome.tabs.sendMessage(tab.id, { type: 'AUTOFILL', profile });
+      const result = await chrome.tabs.sendMessage(tab.id, { type: 'AUTOFILL', profile, jobDescription: jdText || undefined });
       const filled = result?.filled?.length || 0;
       const skipped = result?.skipped?.length || 0;
       const aiFilled = (result?.filled || []).filter(f => f.includes('(AI)')).length;
@@ -163,12 +262,9 @@ async function generateCoverLetter(profile, jobId) {
     $('cl-output').style.display = 'none';
     $('btn-copy').style.display = 'none';
     try {
-      const jobId = await getJobIdFromPage(profile, page?.url);
-      if (!jobId) {
-        showMsg('Could not match this page to a tracked job. Open it from Job Tracker first.', true);
-        return;
-      }
-      const cl = await generateCoverLetter(profile, jobId);
+      const matchedJobId = jdJobId || await getJobIdFromPage(profile, page?.url);
+      const cl = await generateCoverLetter(profile, matchedJobId, jdText || undefined);
+      // cl is null when no context available; generateCoverLetter already called showMsg
       if (cl) {
         $('cl-output').value = cl;
         $('cl-output').style.display = 'block';
