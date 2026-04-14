@@ -580,6 +580,61 @@ ${stripHtml(description).slice(0, 3000)}
     return reply.send({ ok: true, coverLetter: text, jobTitle: job.title, company: job.company });
   });
 
+  // POST /api/jobs/from-jd — extract job details from pasted JD and add to tracker
+  app.post('/api/jobs/from-jd', async (request, reply) => {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey || apiKey === 'your_api_key_here') {
+      return reply.code(503).send({ error: 'OPENAI_API_KEY not configured.' });
+    }
+
+    const { jdText } = request.body as { jdText: string };
+    if (!jdText?.trim()) {
+      return reply.code(400).send({ error: 'jdText is required' });
+    }
+
+    const client = new OpenAI({ apiKey });
+
+    const extraction = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 200,
+      response_format: { type: 'json_object' },
+      messages: [{
+        role: 'user',
+        content: `Extract these fields from the job description as JSON:
+- company (string, company name only)
+- title (string, job title only)
+- location (string, city/state or "Remote", empty string if not found)
+- description_snippet (string, first 300 chars summarising key responsibilities)
+
+Output ONLY valid JSON: {"company":"...","title":"...","location":"...","description_snippet":"..."}
+
+Job Description:
+${jdText.slice(0, 4000)}`,
+      }],
+    });
+
+    let extracted: { company?: string; title?: string; location?: string; description_snippet?: string } = {};
+    try {
+      extracted = JSON.parse(extraction.choices[0]?.message?.content || '{}');
+    } catch {
+      return reply.code(500).send({ error: 'Failed to parse job details from JD' });
+    }
+
+    const company = (extracted.company || 'Unknown Company').trim();
+    const title = (extracted.title || 'Unknown Role').trim();
+    const location = (extracted.location || '').trim();
+    const snippet = (extracted.description_snippet || jdText.slice(0, 300)).trim();
+
+    const externalId = `jd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const result = db.prepare(`
+      INSERT INTO jobs (external_id, title, company, ats_source, location, remote, apply_url,
+        job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
+      VALUES (?, ?, ?, 'manual', ?, 0, '', 'fulltime', 'entry', '', ?, 'saved', '{}', datetime('now'))
+    `).run(externalId, title, company, location, snippet);
+
+    return reply.send({ jobId: result.lastInsertRowid, company, title, location });
+  });
+
   // POST /api/ai-fill — fill unknown form fields via OpenAI
   app.post('/api/ai-fill', async (request, reply) => {
     const apiKey = process.env.OPENAI_API_KEY;
