@@ -518,26 +518,41 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
     }
 
-    const { jobId } = request.body as { jobId: number };
+    const { jobId, jobDescription } = request.body as { jobId?: number; jobDescription?: string };
+
+    if (!jobId && !jobDescription?.trim()) {
+      return reply.code(400).send({ error: 'Either jobId or jobDescription is required' });
+    }
 
     const resume = db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
     if (!resume?.resume_text) {
       return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
     }
 
-    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
-    if (!job) return reply.code(404).send({ error: 'Job not found' });
+    let description = '';
+    let jobTitle = 'the role';
+    let jobCompany = 'the company';
+    let jobLocation = 'Not specified';
 
-    let description = job.description_snippet || '';
-    if (job.raw_json) {
-      try {
-        const raw = JSON.parse(job.raw_json);
-        description = raw.description || raw.content || raw.jobDescription || description;
-      } catch { /* use snippet */ }
-    }
-    if (job.ats_source === 'workday' && job.apply_url && (!description || description === job.description_snippet)) {
-      const wdDesc = await fetchWorkdayDescription(job.apply_url);
-      if (wdDesc) description = wdDesc;
+    if (jobId) {
+      const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+      if (!job) return reply.code(404).send({ error: 'Job not found' });
+      jobTitle = job.title;
+      jobCompany = job.company;
+      jobLocation = job.location || 'Not specified';
+      description = job.description_snippet || '';
+      if (job.raw_json) {
+        try {
+          const raw = JSON.parse(job.raw_json);
+          description = raw.description || raw.content || raw.jobDescription || description;
+        } catch { /* use snippet */ }
+      }
+      if (job.ats_source === 'workday' && job.apply_url && (!description || description === job.description_snippet)) {
+        const wdDesc = await fetchWorkdayDescription(job.apply_url);
+        if (wdDesc) description = wdDesc;
+      }
+    } else {
+      description = jobDescription!;
     }
 
     const client = new OpenAI({ apiKey });
@@ -550,9 +565,9 @@ Write a concise, personalized cover letter (3–4 paragraphs, ~250 words) for th
 ${resume.resume_text.slice(0, 3000)}
 
 ## Job Details
-Company: ${job.company}
-Title: ${job.title}
-Location: ${job.location || 'Not specified'}
+Company: ${jobCompany}
+Title: ${jobTitle}
+Location: ${jobLocation}
 
 ## Job Description
 ${stripHtml(description).slice(0, 3000)}
@@ -577,7 +592,7 @@ ${stripHtml(description).slice(0, 3000)}
     });
 
     const text = completion.choices[0]?.message?.content || '';
-    return reply.send({ ok: true, coverLetter: text, jobTitle: job.title, company: job.company });
+    return reply.send({ ok: true, coverLetter: text, jobTitle, company: jobCompany });
   });
 
   // POST /api/jobs/from-jd — extract job details from pasted JD and add to tracker
