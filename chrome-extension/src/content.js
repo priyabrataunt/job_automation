@@ -220,7 +220,7 @@ function hideBanner(delay) {
 
 // ── Main auto-fill function ───────────────────────────────────────────────────
 
-async function autoFill(profile) {
+async function autoFill(profile, jobDescription) {
   const inputs = Array.from(document.querySelectorAll('input, textarea, select'));
   const filled = [];
   const skipped = [];
@@ -305,7 +305,7 @@ async function autoFill(profile) {
           options: {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields, profile }),
+            body: JSON.stringify({ fields, profile, jobDescription }),
           },
         }, (response) => {
           clearTimeout(timer);
@@ -447,7 +447,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'AUTOFILL') {
-    autoFill(message.profile)
+    autoFill(message.profile, message.jobDescription)
       .then(result => sendResponse(result))
       .catch((err) => {
         console.error('[AutoFill] Fatal error:', err);
