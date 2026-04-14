@@ -121,6 +121,44 @@
     .field-tag.missed {
       background: #3b1c1c; color: #f38ba8;
     }
+    #jd-text {
+      width: 100%;
+      min-height: 100px;
+      background: #181825;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-size: 11px;
+      line-height: 1.6;
+      padding: 10px;
+      resize: vertical;
+      font-family: system-ui, sans-serif;
+      margin-top: 8px;
+    }
+    .section-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #jd-toggle {
+      cursor: pointer;
+      font-size: 11px;
+      color: #89b4fa;
+      font-weight: 600;
+    }
+    #jd-badge {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    #jd-clear {
+      cursor: pointer;
+      font-size: 10px;
+      color: #f38ba8;
+      font-weight: 600;
+    }
+    #jd-clear:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -141,6 +179,22 @@
         <span id="ats-label">Scanning...</span>
       </div>
       <div id="field-summary" class="field-list" style="margin-top:8px;display:none"></div>
+    </div>
+
+    <!-- Job Context -->
+    <div class="section">
+      <div class="section-title-row">
+        <div class="section-title" style="margin-bottom:0">Job Context</div>
+        <span id="jd-toggle">▼ Paste JD</span>
+      </div>
+      <div id="jd-badge">
+        <span class="badge badge-green" id="jd-badge-text">JD loaded ✓</span>
+        <span id="jd-clear">✕ Clear</span>
+      </div>
+      <div id="jd-input-area" style="display:none">
+        <textarea id="jd-text" placeholder="Paste job description here..."></textarea>
+        <button class="btn btn-subtle" id="btn-add-tracker" style="margin-top:6px" disabled>📋 Add to Tracker</button>
+      </div>
     </div>
 
     <!-- Auto-fill -->
