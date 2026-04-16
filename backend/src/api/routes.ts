@@ -105,7 +105,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       offset = '0',
     } = request.query as Record<string, string>;
 
-    const conditions: string[] = ['is_us_job(location) = 1'];
+    const conditions: string[] = ['(is_us_job(location) = 1 OR ats_source = \'manual\')'];
     const params: any[] = [];
 
     if (status) { conditions.push('status = ?'); params.push(status); }

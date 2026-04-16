@@ -353,7 +353,9 @@ function JobCard({ job, onStatusChange, onOptimize }) {
         <button
           onClick={() => {
             const encoded = encodeURIComponent(job.description || job.description_snippet || '')
-            window.open(`http://localhost:5174?jd=${encoded}`, '_blank')
+            const savedAts = localStorage.getItem(`ats_score_${job.id}`)
+            const atsParam = savedAts ? `&ats=${savedAts}` : ''
+            window.open(`http://localhost:5174?jd=${encoded}${atsParam}`, '_blank')
           }}
           style={{
             marginLeft: 'auto',
@@ -1339,7 +1341,7 @@ export default function App() {
   const [stats, setStats] = useState(null)
   const [lastRun, setLastRun] = useState(null)
   const [collecting, setCollecting] = useState(false)
-  const [jsearchCollecting, setJsearchCollecting] = useState(false)
+
   const [offset, setOffset] = useState(0)
   const [prefs, setPrefs] = useState({ keywords: [], company_allowlist: [], company_blocklist: [] })
   const [optimizeJob, setOptimizeJob] = useState(null)
@@ -1416,7 +1418,8 @@ export default function App() {
   useEffect(() => {
     if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history') return
     const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
-    fetchJobs(filters, offset, statusOverride)
+    const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', entry_only: '' } : filters
+    fetchJobs(activeFilters, offset, statusOverride)
     fetchStats()
   }, [tab, filters, offset, fetchJobs, fetchStats])
 
@@ -1426,13 +1429,12 @@ export default function App() {
 
   // Poll collection status
   useEffect(() => {
-    if (!collecting && !jsearchCollecting) return
+    if (!collecting) return
     const iv = setInterval(async () => {
       const res = await fetch(`${API}/api/collect/status`)
       const data = await res.json()
       if (!data.running) {
         setCollecting(false)
-        setJsearchCollecting(false)
         const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
         fetchJobs(filters, offset, statusOverride)
         fetchStats()
@@ -1442,17 +1444,13 @@ export default function App() {
       }
     }, 3000)
     return () => clearInterval(iv)
-  }, [collecting, jsearchCollecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount])
+  }, [collecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount])
 
   async function handleCollect() {
     setCollecting(true)
     await fetch(`${API}/api/collect?hours=48`, { method: 'POST' })
   }
 
-  async function handleJSearchCollect() {
-    setJsearchCollecting(true)
-    await fetch(`${API}/api/collect/jsearch?hours=48`, { method: 'POST' })
-  }
 
   async function handleGlobalResumeUpload(e) {
     const file = e.target.files?.[0]
@@ -1596,22 +1594,6 @@ export default function App() {
         >
           {collecting ? 'Collecting...' : '🔄 Collect Now'}
         </button>
-        <button
-          onClick={handleJSearchCollect}
-          disabled={jsearchCollecting || collecting}
-          style={{
-            background: jsearchCollecting ? 'var(--bg-surface-alt)' : '#40a02b',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            padding: '8px 16px',
-            fontWeight: 600,
-            cursor: (jsearchCollecting || collecting) ? 'not-allowed' : 'pointer',
-            fontSize: 13,
-          }}
-        >
-          {jsearchCollecting ? 'Searching...' : '🔍 LinkedIn / Indeed'}
-        </button>
       </div>
 
       {/* Tabs */}
@@ -1668,8 +1650,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Filter Bar (hidden on Saved/Applied since status is locked) */}
-            <div style={{
+            {/* Filter Bar (hidden on Applied tab) */}
+            {tab !== 'applied' && <div style={{
               display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
               background: 'var(--bg-surface)', border: '1px solid var(--border)',
               borderRadius: 10, padding: '10px 14px', marginBottom: 16,
@@ -1752,7 +1734,7 @@ export default function App() {
                   borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12,
                 }}
               >Clear</button>
-            </div>
+            </div>}
 
             {/* Add Manually button — Applied tab only */}
             {tab === 'applied' && (

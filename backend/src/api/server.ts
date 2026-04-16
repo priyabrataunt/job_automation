@@ -12,7 +12,8 @@ export function buildServer() {
         !origin ||
         origin.startsWith('chrome-extension://') ||
         origin === 'http://localhost:3000' ||
-        origin === 'http://localhost:5173';
+        origin === 'http://localhost:5173' ||
+        origin === 'http://localhost:5174';
       cb(null, allowed);
     },
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],

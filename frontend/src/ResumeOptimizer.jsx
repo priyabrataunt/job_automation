@@ -125,7 +125,7 @@ function ResumeUpload({ onUploaded, currentFile }) {
       <input
         ref={fileRef}
         type="file"
-        accept=".pdf,.txt"
+        accept=".pdf,.txt,.tex"
         style={{ display: 'none' }}
         onChange={handleUpload}
       />
@@ -192,6 +192,9 @@ export default function ResumeOptimizer({ job, onClose }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scoring failed')
       setResult(data)
+      if (data.overall != null) {
+        localStorage.setItem(`ats_score_${job.id}`, data.overall)
+      }
     } catch (err) {
       setError(err.message)
     }
