@@ -274,6 +274,15 @@ function ScoreTooltip({ details, score, children }) {
 }
 
 function JobCard({ job, onStatusChange, onOptimize }) {
+  let fullDescription = job.description || job.description_snippet || ''
+  if (job.raw_json) {
+    try {
+      const parsed = typeof job.raw_json === 'string' ? JSON.parse(job.raw_json) : job.raw_json
+      const manualDescription = parsed?.manualContext?.jobDescription
+      if (manualDescription) fullDescription = manualDescription
+    } catch {}
+  }
+
   return (
     <div style={{
       background: 'var(--bg-surface)',
@@ -352,7 +361,7 @@ function JobCard({ job, onStatusChange, onOptimize }) {
         ))}
         <button
           onClick={() => {
-            const encoded = encodeURIComponent(job.description || job.description_snippet || '')
+            const encoded = encodeURIComponent(fullDescription)
             const savedAts = localStorage.getItem(`ats_score_${job.id}`)
             const atsParam = savedAts ? `&ats=${savedAts}` : ''
             window.open(`http://localhost:5174?jd=${encoded}${atsParam}`, '_blank')

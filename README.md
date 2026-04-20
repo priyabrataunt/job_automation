@@ -157,6 +157,7 @@ The companion extension auto-fills job application forms and generates tailored 
 2. Enable **Developer mode**
 3. Click **Load unpacked** → select the `chrome-extension/` folder
 4. Click the extension icon and configure your profile
+5. In `profile.json`, set `job_tracker_url` if your backend is not running at `http://localhost:8000`
 
 ---
 

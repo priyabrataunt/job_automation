@@ -130,7 +130,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const lim = Math.min(parseInt(limit) || 50, 200);
+    const lim = Math.min(parseInt(limit) || 50, 1000);
     const off = parseInt(offset) || 0;
 
     const total = (db.prepare(`SELECT COUNT(*) as count FROM jobs ${where}`).get(...params) as any).count;
@@ -146,20 +146,38 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /api/jobs/manual — add a job manually (e.g. applied outside the tracker)
   app.post('/api/jobs/manual', async (request, reply) => {
-    const { title, company, apply_url, location, notes } = request.body as {
-      title: string; company: string; apply_url?: string; location?: string; notes?: string;
+    const { title, company, apply_url, location, notes, description_snippet, raw_json, job_type } = request.body as {
+      title: string;
+      company: string;
+      apply_url?: string;
+      location?: string;
+      notes?: string;
+      description_snippet?: string;
+      raw_json?: string;
+      job_type?: string;
     };
 
     if (!title?.trim() || !company?.trim()) {
       return reply.code(400).send({ error: 'title and company are required' });
     }
 
+    const snippet = (description_snippet || notes || '').trim();
+    const safeJobType = ['fulltime', 'internship', 'coop'].includes(job_type || '') ? job_type : 'fulltime';
     const externalId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const result = db.prepare(`
       INSERT INTO jobs (external_id, title, company, ats_source, location, remote, apply_url,
-        job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
-      VALUES (?, ?, ?, 'manual', ?, 0, ?, 'fulltime', 'entry', '', ?, 'applied', '{}', datetime('now'))
-    `).run(externalId, title.trim(), company.trim(), location?.trim() || '', apply_url?.trim() || '', notes?.trim() || '');
+        job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at, status_updated_at)
+      VALUES (?, ?, ?, 'manual', ?, 0, ?, ?, 'entry', '', ?, 'applied', ?, datetime('now'), datetime('now'))
+    `).run(
+      externalId,
+      title.trim(),
+      company.trim(),
+      location?.trim() || '',
+      apply_url?.trim() || '',
+      safeJobType,
+      snippet,
+      raw_json?.trim() || '{}',
+    );
 
     const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(result.lastInsertRowid) as any;
     return reply.code(201).send({ job });
@@ -168,14 +186,65 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // PATCH /api/jobs/:id/status
   app.patch('/api/jobs/:id/status', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { status } = request.body as { status: string };
+    const {
+      status,
+      title,
+      company,
+      apply_url,
+      location,
+      description_snippet,
+      raw_json,
+      job_type,
+    } = request.body as {
+      status: string;
+      title?: string;
+      company?: string;
+      apply_url?: string;
+      location?: string;
+      description_snippet?: string;
+      raw_json?: string;
+      job_type?: string;
+    };
 
     const valid = ['new', 'saved', 'queued', 'applied', 'followed_up', 'response', 'rejected', 'archived'];
     if (!valid.includes(status)) {
       return reply.code(400).send({ error: `Invalid status. Must be one of: ${valid.join(', ')}` });
     }
 
-    db.prepare("UPDATE jobs SET status = ?, status_updated_at = datetime('now') WHERE id = ?").run(status, parseInt(id));
+    const updates = ['status = ?', "status_updated_at = datetime('now')"];
+    const params: any[] = [status];
+
+    if (title?.trim()) {
+      updates.push('title = ?');
+      params.push(title.trim());
+    }
+    if (company?.trim()) {
+      updates.push('company = ?');
+      params.push(company.trim());
+    }
+    if (apply_url?.trim()) {
+      updates.push('apply_url = ?');
+      params.push(apply_url.trim());
+    }
+    if (location?.trim()) {
+      updates.push('location = ?');
+      params.push(location.trim());
+    }
+    if (description_snippet?.trim()) {
+      updates.push('description_snippet = ?');
+      params.push(description_snippet.trim());
+    }
+    if (raw_json?.trim()) {
+      updates.push('raw_json = ?');
+      params.push(raw_json.trim());
+    }
+    if (['fulltime', 'internship', 'coop'].includes(job_type || '')) {
+      updates.push('job_type = ?');
+      params.push(job_type);
+    }
+
+    params.push(parseInt(id));
+    db.prepare(`UPDATE jobs SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     return reply.send({ ok: true });
   });
 
@@ -641,13 +710,14 @@ ${jdText.slice(0, 4000)}`,
     const snippet = (extracted.description_snippet || jdText.slice(0, 300)).trim();
 
     const externalId = `jd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const rawJson = JSON.stringify({ jobDescription: jdText.trim() });
     const result = db.prepare(`
       INSERT INTO jobs (external_id, title, company, ats_source, location, remote, apply_url,
         job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
-      VALUES (?, ?, ?, 'manual', ?, 0, '', 'fulltime', 'entry', '', ?, 'saved', '{}', datetime('now'))
-    `).run(externalId, title, company, location, snippet);
+      VALUES (?, ?, ?, 'manual', ?, 0, '', 'fulltime', 'entry', '', ?, 'saved', ?, datetime('now'))
+    `).run(externalId, title, company, location, snippet, rawJson);
 
-    return reply.send({ jobId: result.lastInsertRowid, company, title, location });
+    return reply.send({ jobId: result.lastInsertRowid, company, title, location, descriptionSnippet: snippet });
   });
 
   // POST /api/ai-fill — fill unknown form fields via OpenAI

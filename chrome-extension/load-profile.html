@@ -22,7 +22,7 @@
 </head>
 <body>
   <h1>🎯 Load Your Profile</h1>
-  <p>Paste the contents of your <code>profile.json</code> below and click Save. This stores your profile in the extension's local storage so the popup can use it.</p>
+  <p>Paste the contents of your <code>profile.json</code> below and click Save. This stores your profile in the extension's local storage so the popup can use it. If <code>job_tracker_url</code> is missing, the extension will default to <code>http://localhost:8000</code>.</p>
   <textarea id="json-input" placeholder='{"personal": {"name": "...", ...}}'></textarea>
   <br/>
   <button id="save-btn">Save Profile to Extension</button>

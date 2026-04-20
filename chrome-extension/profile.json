@@ -1,5 +1,6 @@
 {
   "_comment": "Fill in your details here. This file is read by the extension for auto-fill.",
+  "job_tracker_url": "http://localhost:8000",
   "personal": {
     "name": "Priyabrata Behera",
     "email": "pbehera.tech@gmail.com",
