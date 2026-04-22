@@ -8,13 +8,13 @@ import { initPush } from './push';
 async function main() {
   console.log('[App] Starting Job Tracker...');
 
-  initDb();
+  await initDb();
   initPush();
   await startServer(8000);
   startScheduler();
 
   // Purge stale jobs on startup
-  const purged = purgeOldJobs();
+  const purged = await purgeOldJobs();
   if (purged > 0) console.log(`[App] Purged ${purged} stale jobs (>48h old)`);
 
   console.log('[App] Running initial collection (48h back)...');

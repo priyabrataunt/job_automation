@@ -1,83 +1,258 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { Pool, QueryResultRow } from 'pg';
 import { COMPANIES as WORKDAY_COMPANIES } from '../collectors/workday';
-import { parseExperienceYears, isEntryTitle, detectExperienceLevel } from '../collectors/filters';
+import { parseExperienceYears, detectExperienceLevel } from '../collectors/filters';
 import { isOptFriendly, getSponsorTier } from '../data/opt-friendly-companies';
 
-const DB_PATH = path.join(__dirname, '../../jobs.db');
-
-const db = new Database(DB_PATH);
-
-// Register a custom SQL function to filter US/Remote jobs
-const US_STATES = [
-  'alabama','alaska','arizona','arkansas','california','colorado','connecticut',
-  'delaware','florida','georgia','hawaii','idaho','illinois','indiana','iowa',
-  'kansas','kentucky','louisiana','maine','maryland','massachusetts','michigan',
-  'minnesota','mississippi','missouri','montana','nebraska','nevada',
-  'new hampshire','new jersey','new mexico','new york','north carolina',
-  'north dakota','ohio','oklahoma','oregon','pennsylvania','rhode island',
-  'south carolina','south dakota','tennessee','texas','utah','vermont',
-  'virginia','washington','west virginia','wisconsin','wyoming',
-  'district of columbia',
-];
-const US_STATE_ABBRS = [
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-  'VA','WA','WV','WI','WY','DC',
-];
-const US_CITIES = [
-  'new york','nyc','manhattan','brooklyn','san francisco','sf','los angeles',
-  'chicago','houston','phoenix','philadelphia','san antonio','san diego',
-  'dallas','austin','san jose','jacksonville','columbus','charlotte',
-  'indianapolis','seattle','denver','nashville','boston','el paso','detroit',
-  'memphis','portland','las vegas','louisville','baltimore','milwaukee',
-  'albuquerque','tucson','fresno','sacramento','mesa','kansas city','atlanta',
-  'omaha','raleigh','long beach','colorado springs','miami','tampa','tulsa',
-  'minneapolis','arlington','pittsburgh','palo alto','mountain view',
-  'sunnyvale','santa clara','cupertino','menlo park','redwood city',
-  'foster city','san mateo','fremont','irvine','bellevue','redmond','kirkland',
-  'reston','mclean','herndon','tysons','cambridge','somerville','boulder',
-  'fort collins','durham','chapel hill','ann arbor','madison','salt lake city',
-  'provo','scottsdale','tempe','plano','frisco','irving','huntsville',
-  'huntington beach','oakland','berkeley','pasadena','burbank','glendale',
-  'santa monica','venice','culver city','torrance','scotts valley',
-  'concord','walnut creek','pleasanton','loveland','nampa','stennis',
-];
-function isUSLocation(location: string): boolean {
-  if (!location || !location.trim()) return true; // empty = keep
-  const l = location.toLowerCase().trim();
-  // Explicit US markers
-  if (/\bunited states\b|\busa\b|\bu\.s\.a\b|\bu\.s\b/.test(l)) return true;
-  // "US" as standalone token
-  if (/(?:^|[\s,\-/|;])us(?:$|[\s,\-/|;])/.test(l)) return true;
-  // Check full state names
-  if (US_STATES.some(s => l.includes(s))) return true;
-  // Check state abbreviations — word-bounded, case-sensitive on original
-  if (US_STATE_ABBRS.some(a => new RegExp(`(?:^|[\\s,\\-/|;(])${a}(?:$|[\\s,\\-/|;)])`).test(location))) return true;
-  // Check known US cities
-  if (US_CITIES.some(c => l.includes(c))) return true;
-  // "Remote" alone (no region qualifier like "Remote - India") = assume US
-  if (/\bremote\b/i.test(l) && !/remote\s*[-–]\s*(?!us\b|sf\b|bay\b|nyc\b)/i.test(l)) return true;
-  // "North America" includes US
-  if (l.includes('north america')) return true;
-  return false;
+interface RunResult {
+  changes: number;
+  lastInsertRowid?: number;
 }
 
-db.function('is_us_job', (loc: string | null) => isUSLocation(loc || '') ? 1 : 0);
-db.function('is_entry_title', (title: string | null) => isEntryTitle(title || '') ? 1 : 0);
+interface PreparedStatement {
+  get<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T | undefined>;
+  all<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T[]>;
+  run(...params: any[]): Promise<RunResult>;
+}
 
-export function initDb(): void {
-  db.exec(`
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error('DATABASE_URL is required. Add it to backend/.env');
+}
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: DATABASE_URL.includes('sslmode=require') || DATABASE_URL.includes('neon.tech')
+    ? { rejectUnauthorized: false }
+    : undefined,
+});
+
+function normalizeSql(sql: string): string {
+  let out = sql.trim();
+
+  // SQLite compat transforms
+  const hadInsertOrIgnore = /\binsert\s+or\s+ignore\s+into\b/i.test(out);
+  out = out.replace(/\binsert\s+or\s+ignore\s+into\b/gi, 'INSERT INTO');
+  out = out.replace(/datetime\('now'\)/gi, 'NOW()');
+
+  if (hadInsertOrIgnore && !/\bon\s+conflict\b/i.test(out)) {
+    out = `${out} ON CONFLICT DO NOTHING`;
+  }
+
+  return out;
+}
+
+function normalizeParamValue(value: any): any {
+  if (value === undefined) return null;
+  return value;
+}
+
+function buildQuery(sql: string, params: any[]): { text: string; values: any[] } {
+  const text = normalizeSql(sql);
+
+  if (params.length === 1 && params[0] && typeof params[0] === 'object' && !Array.isArray(params[0]) && /@[a-zA-Z_]\w*/.test(text)) {
+    const named = params[0] as Record<string, any>;
+    const values: any[] = [];
+    const rewritten = text.replace(/@([a-zA-Z_]\w*)/g, (_match, key: string) => {
+      values.push(normalizeParamValue(named[key]));
+      return `$${values.length}`;
+    });
+    return { text: rewritten, values };
+  }
+
+  let idx = 0;
+  const values = params.map(normalizeParamValue);
+  const rewritten = text.replace(/\?/g, () => {
+    idx += 1;
+    return `$${idx}`;
+  });
+
+  return { text: rewritten, values };
+}
+
+async function execute(sql: string, params: any[] = []): Promise<{ rows: any[]; rowCount: number }> {
+  const { text, values } = buildQuery(sql, params);
+  const result = await pool.query(text, values);
+  return { rows: result.rows, rowCount: result.rowCount ?? 0 };
+}
+
+const db = {
+  async exec(sql: string): Promise<void> {
+    await pool.query(normalizeSql(sql));
+  },
+
+  transaction<T extends any[]>(fn: (...args: T) => Promise<void> | void): (...args: T) => Promise<void> {
+    return async (...args: T): Promise<void> => {
+      await fn(...args);
+    };
+  },
+
+  prepare(sql: string): PreparedStatement {
+    return {
+      async get<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T | undefined> {
+        const { rows } = await execute(sql, params);
+        return rows[0] as T | undefined;
+      },
+
+      async all<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T[]> {
+        const { rows } = await execute(sql, params);
+        return rows as T[];
+      },
+
+      async run(...params: any[]): Promise<RunResult> {
+        const { rows, rowCount } = await execute(sql, params);
+        let lastInsertRowid: number | undefined;
+
+        if (rows[0]?.id !== undefined && rows[0]?.id !== null) {
+          const id = Number(rows[0].id);
+          lastInsertRowid = Number.isNaN(id) ? undefined : id;
+        } else if (/^\s*insert\b/i.test(sql) && rowCount > 0) {
+          try {
+            const result = await pool.query('SELECT LASTVAL() AS id');
+            const id = Number(result.rows[0]?.id);
+            lastInsertRowid = Number.isNaN(id) ? undefined : id;
+          } catch {
+            // ignore when no sequence-backed insert is involved
+          }
+        }
+
+        return {
+          changes: rowCount,
+          lastInsertRowid,
+        };
+      },
+    };
+  },
+};
+
+async function createSqlFunctions(): Promise<void> {
+  const usStates = [
+    'alabama','alaska','arizona','arkansas','california','colorado','connecticut',
+    'delaware','florida','georgia','hawaii','idaho','illinois','indiana','iowa',
+    'kansas','kentucky','louisiana','maine','maryland','massachusetts','michigan',
+    'minnesota','mississippi','missouri','montana','nebraska','nevada',
+    'new hampshire','new jersey','new mexico','new york','north carolina',
+    'north dakota','ohio','oklahoma','oregon','pennsylvania','rhode island',
+    'south carolina','south dakota','tennessee','texas','utah','vermont',
+    'virginia','washington','west virginia','wisconsin','wyoming','district of columbia',
+  ];
+
+  const usStateAbbrs = [
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC',
+  ];
+
+  const usCities = [
+    'new york','nyc','manhattan','brooklyn','san francisco','sf','los angeles',
+    'chicago','houston','phoenix','philadelphia','san antonio','san diego',
+    'dallas','austin','san jose','jacksonville','columbus','charlotte',
+    'indianapolis','seattle','denver','nashville','boston','el paso','detroit',
+    'memphis','portland','las vegas','louisville','baltimore','milwaukee',
+    'albuquerque','tucson','fresno','sacramento','mesa','kansas city','atlanta',
+    'omaha','raleigh','long beach','colorado springs','miami','tampa','tulsa',
+    'minneapolis','arlington','pittsburgh','palo alto','mountain view',
+    'sunnyvale','santa clara','cupertino','menlo park','redwood city',
+    'foster city','san mateo','fremont','irvine','bellevue','redmond','kirkland',
+    'reston','mclean','herndon','tysons','cambridge','somerville','boulder',
+    'fort collins','durham','chapel hill','ann arbor','madison','salt lake city',
+    'provo','scottsdale','tempe','plano','frisco','irving','huntsville',
+    'huntington beach','oakland','berkeley','pasadena','burbank','glendale',
+    'santa monica','venice','culver city','torrance','scotts valley',
+    'concord','walnut creek','pleasanton','loveland','nampa','stennis',
+  ];
+
+  const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+  const stateList = usStates.map(quote).join(', ');
+  const stateAbbrList = usStateAbbrs.map(quote).join(', ');
+  const cityList = usCities.map(quote).join(', ');
+
+  await db.exec(`
+    CREATE OR REPLACE FUNCTION is_entry_title(title TEXT)
+    RETURNS INTEGER
+    LANGUAGE SQL
+    IMMUTABLE
+    AS $$
+      SELECT CASE
+        WHEN COALESCE(title, '') ~* '(\\mintern\\M|\\minternship\\M|\\mco-?op\\M|\\mjunior\\M|\\mjr\\.?\\M|\\mnew\\s+grads?\\M|\\mentry[\\s-]level\\M|\\mapprentice\\M|\\mearly\\s+career\\M|\\mgraduates?\\M|\\massociate\\M|\\mfellow\\M|\\mstudent\\M)'
+        THEN 1
+        ELSE 0
+      END
+    $$;
+  `);
+
+  await db.exec(`
+    CREATE OR REPLACE FUNCTION is_us_job(location TEXT)
+    RETURNS INTEGER
+    LANGUAGE plpgsql
+    IMMUTABLE
+    AS $$
+    DECLARE
+      l TEXT := lower(trim(COALESCE(location, '')));
+      state_name TEXT;
+      state_abbr TEXT;
+      city_name TEXT;
+      us_states TEXT[] := ARRAY[${stateList}];
+      us_state_abbrs TEXT[] := ARRAY[${stateAbbrList}];
+      us_cities TEXT[] := ARRAY[${cityList}];
+    BEGIN
+      IF l = '' THEN
+        RETURN 1;
+      END IF;
+
+      IF l ~ '(\\munited states\\M|\\musa\\M|\\mu\\.s\\.a\\M|\\mu\\.s\\M)' THEN
+        RETURN 1;
+      END IF;
+
+      IF l ~ '(^|[[:space:],\\-/|;])us($|[[:space:],\\-/|;])' THEN
+        RETURN 1;
+      END IF;
+
+      FOREACH state_name IN ARRAY us_states LOOP
+        IF POSITION(state_name IN l) > 0 THEN
+          RETURN 1;
+        END IF;
+      END LOOP;
+
+      FOREACH state_abbr IN ARRAY us_state_abbrs LOOP
+        IF COALESCE(location, '') ~ ('(^|[[:space:],\\-/|;(])' || state_abbr || '($|[[:space:],\\-/|;)])') THEN
+          RETURN 1;
+        END IF;
+      END LOOP;
+
+      FOREACH city_name IN ARRAY us_cities LOOP
+        IF POSITION(city_name IN l) > 0 THEN
+          RETURN 1;
+        END IF;
+      END LOOP;
+
+      IF l ~ 'remote' AND l !~ 'remote\\s*[-–]\\s*(us\\M|sf\\M|bay\\M|nyc\\M)' THEN
+        RETURN 1;
+      END IF;
+
+      IF POSITION('north america' IN l) > 0 THEN
+        RETURN 1;
+      END IF;
+
+      RETURN 0;
+    END
+    $$;
+  `);
+}
+
+export async function initDb(): Promise<void> {
+  await createSqlFunctions();
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       external_id TEXT NOT NULL,
       title TEXT NOT NULL,
       company TEXT NOT NULL,
       ats_source TEXT NOT NULL,
       location TEXT DEFAULT '',
       remote INTEGER DEFAULT 0,
-      posted_at TEXT,
+      posted_at TIMESTAMPTZ,
       apply_url TEXT NOT NULL,
       job_type TEXT DEFAULT 'fulltime',
       experience_level TEXT DEFAULT 'entry',
@@ -85,145 +260,107 @@ export function initDb(): void {
       description_snippet TEXT DEFAULT '',
       status TEXT DEFAULT 'new',
       raw_json TEXT DEFAULT '',
-      first_seen_at TEXT NOT NULL,
+      first_seen_at TIMESTAMPTZ NOT NULL,
+      relevance_score INTEGER DEFAULT 0,
+      hired_score INTEGER DEFAULT NULL,
+      hired_score_details TEXT DEFAULT NULL,
+      max_experience_years INTEGER DEFAULT NULL,
+      status_updated_at TIMESTAMPTZ DEFAULT NULL,
+      visa_signal INTEGER DEFAULT NULL,
+      opt_friendly INTEGER DEFAULT 0,
+      sponsor_tier TEXT DEFAULT NULL,
+      queue_position INTEGER DEFAULT NULL,
       UNIQUE(external_id, ats_source)
     );
 
     CREATE TABLE IF NOT EXISTS companies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       ats_platform TEXT NOT NULL,
       ats_url TEXT NOT NULL,
-      last_crawled_at TEXT
+      last_crawled_at TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS runs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      started_at TEXT NOT NULL,
-      finished_at TEXT,
+      id SERIAL PRIMARY KEY,
+      started_at TIMESTAMPTZ NOT NULL,
+      finished_at TIMESTAMPTZ,
       jobs_found INTEGER DEFAULT 0,
       jobs_new INTEGER DEFAULT 0,
       errors TEXT DEFAULT '',
       status TEXT DEFAULT 'running'
     );
 
-    CREATE INDEX IF NOT EXISTS idx_jobs_posted_at ON jobs(posted_at);
-    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_jobs_ats_source ON jobs(ats_source);
-  `);
-
-  // Migration: add experience_level if it doesn't exist yet (for existing DBs)
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN experience_level TEXT DEFAULT 'entry'`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add relevance_score
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN relevance_score INTEGER DEFAULT 0`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add hired_score for Getting Hired Score feature
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN hired_score INTEGER DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add hired_score_details JSON for score breakdown tooltip
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN hired_score_details TEXT DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add max_experience_years for Entry Roles filter
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN max_experience_years INTEGER DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add status_updated_at for follow-up reminder tracking
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN status_updated_at TEXT DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add visa_signal for per-job visa badge (0=no sponsor, 50=ambiguous, 100=sponsors)
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN visa_signal INTEGER DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add opt_friendly flag (known H1B/OPT sponsor company)
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN opt_friendly INTEGER DEFAULT 0`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // Migration: add sponsor_tier for tiered visa intelligence (top/regular/known/null)
-  try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN sponsor_tier TEXT DEFAULT NULL`);
-  } catch {
-    // Column already exists — ignore
-  }
-
-  // User preferences (single-row config)
-  db.exec(`
     CREATE TABLE IF NOT EXISTS user_preferences (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
+      id INTEGER PRIMARY KEY,
       keywords TEXT DEFAULT '[]',
       company_allowlist TEXT DEFAULT '[]',
-      company_blocklist TEXT DEFAULT '[]'
+      company_blocklist TEXT DEFAULT '[]',
+      CONSTRAINT user_preferences_single CHECK (id = 1)
     );
-  `);
-  // Ensure the single row exists
-  db.exec(`INSERT OR IGNORE INTO user_preferences (id) VALUES (1)`);
 
-  // Push subscriptions for browser notifications
-  db.exec(`
     CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       endpoint TEXT NOT NULL UNIQUE,
       keys_p256dh TEXT NOT NULL,
       keys_auth TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-  `);
 
-  // Index for digest queries
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score)`);
-
-  // Resume storage (single-row, stores parsed text from uploaded PDF)
-  db.exec(`
     CREATE TABLE IF NOT EXISTS user_resume (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
+      id INTEGER PRIMARY KEY,
       filename TEXT DEFAULT '',
       resume_text TEXT DEFAULT '',
-      uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT user_resume_single CHECK (id = 1)
     );
+
+    CREATE TABLE IF NOT EXISTS answer_cache (
+      id SERIAL PRIMARY KEY,
+      question_text TEXT NOT NULL,
+      question_hash TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      source TEXT NOT NULL,
+      confidence REAL DEFAULT 0.5,
+      times_used INTEGER DEFAULT 0,
+      last_used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS application_sessions (
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER REFERENCES jobs(id),
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      status TEXT DEFAULT 'in_progress',
+      fields_total INTEGER DEFAULT 0,
+      fields_filled INTEGER DEFAULT 0,
+      fields_corrected INTEGER DEFAULT 0,
+      adapter_used TEXT,
+      error_log TEXT,
+      form_snapshot JSONB
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_jobs_posted_at ON jobs(posted_at);
+    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_jobs_ats_source ON jobs(ats_source);
+    CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score);
+    CREATE INDEX IF NOT EXISTS idx_jobs_queue_position ON jobs(queue_position);
+    CREATE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
   `);
 
-  // Migration: remove cross-ATS duplicates (keep one per title+company,
-  // preferring non-aggregator sources and user-modified statuses like saved/applied).
-  const dupeCount = (db.prepare(`
-    SELECT COUNT(*) as c FROM jobs WHERE id NOT IN (
+  await db.prepare('INSERT INTO user_preferences (id) VALUES (1) ON CONFLICT (id) DO NOTHING').run();
+
+  // Remove cross-ATS duplicates (keep one per title+company)
+  const dupeCountRow = await db.prepare(`
+    SELECT COUNT(*)::int AS c FROM jobs WHERE id NOT IN (
       SELECT MIN(id) FROM jobs GROUP BY LOWER(TRIM(title)), LOWER(TRIM(company))
     )
-  `).get() as any).c;
+  `).get<{ c: number }>();
+  const dupeCount = dupeCountRow?.c ?? 0;
+
   if (dupeCount > 0) {
-    // Keep the best row per (title, company) group:
-    // 1. Prefer rows with status saved/applied
-    // 2. Prefer non-aggregator (non-simplifyjobs) sources
-    // 3. Prefer the earliest (lowest id)
-    db.exec(`
+    await db.exec(`
       DELETE FROM jobs WHERE id NOT IN (
         SELECT id FROM (
           SELECT id,
@@ -233,39 +370,42 @@ export function initDb(): void {
                 CASE WHEN status IN ('saved','applied') THEN 0 ELSE 1 END,
                 CASE WHEN ats_source = 'simplifyjobs' THEN 1 ELSE 0 END,
                 id
-            ) as rn
+            ) AS rn
           FROM jobs
-        ) WHERE rn = 1
+        ) AS ranked
+        WHERE rn = 1
       )
     `);
     console.log(`[DB] Cleaned ${dupeCount} cross-ATS duplicate rows`);
   }
 
-  // Migration: fix Workday apply_url to include board path for browsable career page links
+  // Fix Workday apply_url to include board path for browsable career page links
   const fixUrlStmt = db.prepare(
-    `UPDATE jobs SET apply_url = ? || '/en-US/' || ? || SUBSTR(apply_url, LENGTH(?) + 1)
-     WHERE ats_source = 'workday' AND company = ? AND apply_url LIKE ? || '/job/%'`
+    `UPDATE jobs
+     SET apply_url = ? || '/en-US/' || ? || SUBSTRING(apply_url FROM LENGTH(?) + 1)
+     WHERE ats_source = 'workday' AND company = ? AND apply_url LIKE ?`
   );
   let fixedUrls = 0;
   for (const c of WORKDAY_COMPANIES) {
     const base = `https://${c.id}.${c.wd}.myworkdayjobs.com`;
-    const result = fixUrlStmt.run(base, c.board, base, c.displayName, base);
+    const pattern = `${base}/job/%`;
+    const result = await fixUrlStmt.run(base, c.board, base, c.displayName, pattern);
     fixedUrls += result.changes;
   }
   if (fixedUrls > 0) {
     console.log(`[DB] Fixed ${fixedUrls} Workday apply URLs (added board path)`);
   }
 
-  // Fix experience_level for jobs misclassified due to substring matching (e.g. "International" → "internship")
-  const misclassified = db.prepare(
-    `SELECT id, title, experience_level FROM jobs`
-  ).all() as any[];
+  // Fix experience_level for jobs misclassified due to substring matching
+  const misclassified = await db.prepare(
+    'SELECT id, title, experience_level FROM jobs'
+  ).all<{ id: number; title: string; experience_level: string }>();
   const fixExpLevel = db.prepare('UPDATE jobs SET experience_level = ? WHERE id = ?');
   let fixedExpLevel = 0;
   for (const row of misclassified) {
     const correct = detectExperienceLevel(row.title);
     if (correct !== row.experience_level) {
-      fixExpLevel.run(correct, row.id);
+      await fixExpLevel.run(correct, row.id);
       fixedExpLevel++;
     }
   }
@@ -274,9 +414,9 @@ export function initDb(): void {
   }
 
   // Backfill max_experience_years for existing jobs that haven't been parsed
-  const unparsed = db.prepare(
-    `SELECT id, title, description_snippet, raw_json FROM jobs WHERE max_experience_years IS NULL`
-  ).all() as any[];
+  const unparsed = await db.prepare(
+    'SELECT id, title, description_snippet, raw_json FROM jobs WHERE max_experience_years IS NULL'
+  ).all<{ id: number; title: string; description_snippet: string; raw_json: string }>();
   if (unparsed.length > 0) {
     const updateExp = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
     let backfilled = 0;
@@ -289,61 +429,61 @@ export function initDb(): void {
           if (typeof rawDesc === 'string' && rawDesc.length > desc.length) {
             desc = rawDesc.replace(/<[^>]+>/g, ' ');
           }
-        } catch { /* use snippet */ }
+        } catch {
+          // use snippet fallback
+        }
       }
-      const years = parseExperienceYears(row.title + ' ' + desc);
+
+      const years = parseExperienceYears(`${row.title} ${desc}`);
       if (years !== null) {
-        updateExp.run(years, row.id);
+        await updateExp.run(years, row.id);
         backfilled++;
       }
     }
+
     if (backfilled > 0) {
       console.log(`[DB] Backfilled max_experience_years for ${backfilled} jobs`);
     }
   }
 
   // Backfill opt_friendly for existing jobs that haven't been flagged
-  const unFlagged = db.prepare(
-    `SELECT id, company FROM jobs WHERE opt_friendly = 0`
-  ).all() as { id: number; company: string }[];
+  const unFlagged = await db.prepare(
+    'SELECT id, company FROM jobs WHERE opt_friendly = 0'
+  ).all<{ id: number; company: string }>();
   if (unFlagged.length > 0) {
     const updateOpt = db.prepare('UPDATE jobs SET opt_friendly = ? WHERE id = ?');
     let flagged = 0;
-    db.transaction(() => {
-      for (const row of unFlagged) {
-        if (isOptFriendly(row.company)) {
-          updateOpt.run(1, row.id);
-          flagged++;
-        }
+    for (const row of unFlagged) {
+      if (isOptFriendly(row.company)) {
+        await updateOpt.run(1, row.id);
+        flagged++;
       }
-    })();
+    }
     if (flagged > 0) {
       console.log(`[DB] Flagged ${flagged} OPT-friendly companies`);
     }
   }
 
   // Backfill sponsor_tier for all jobs
-  const untiered = db.prepare(
-    `SELECT id, company FROM jobs WHERE sponsor_tier IS NULL`
-  ).all() as { id: number; company: string }[];
+  const untiered = await db.prepare(
+    'SELECT id, company FROM jobs WHERE sponsor_tier IS NULL'
+  ).all<{ id: number; company: string }>();
   if (untiered.length > 0) {
     const updateTier = db.prepare('UPDATE jobs SET sponsor_tier = ? WHERE id = ?');
     let tiered = 0;
-    db.transaction(() => {
-      for (const row of untiered) {
-        const tier = getSponsorTier(row.company);
-        if (tier) {
-          updateTier.run(tier, row.id);
-          tiered++;
-        }
+    for (const row of untiered) {
+      const tier = getSponsorTier(row.company);
+      if (tier) {
+        await updateTier.run(tier, row.id);
+        tiered++;
       }
-    })();
+    }
     if (tiered > 0) {
       console.log(`[DB] Set sponsor_tier for ${tiered} jobs`);
     }
   }
 
-  console.log('Database initialized at', DB_PATH);
+  console.log('[DB] Neon/Postgres database initialized');
 }
 
 export default db;

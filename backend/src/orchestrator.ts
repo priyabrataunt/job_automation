@@ -4,7 +4,7 @@ import { collectJSearch } from './collectors/jsearch';
 import { Job } from './db/schema';
 import { scoreNewJobs } from './scoring';
 import { parseExperienceYears } from './collectors/filters';
-import { isOptFriendly, getSponsorTier } from './data/opt-friendly-companies';
+import { getSponsorTier } from './data/opt-friendly-companies';
 
 /**
  * Deduplicate jobs across ATS sources by normalized title + company.
@@ -54,11 +54,10 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
   const startedAt = new Date().toISOString();
   const errors: string[] = [];
 
-  const insertRun = db.prepare(`
-    INSERT INTO runs (started_at, status) VALUES (?, 'running')
-  `);
-  const runResult = insertRun.run(startedAt);
-  const runId = runResult.lastInsertRowid as number;
+  const runResult = await db.prepare(
+    `INSERT INTO runs (started_at, status) VALUES (?, 'running') RETURNING id`
+  ).run(startedAt);
+  const runId = runResult.lastInsertRowid ?? -1;
 
   console.log(`[Orchestrator] Run #${runId} started`);
 
@@ -78,61 +77,68 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
   }
 
   const insertJob = db.prepare(`
-    INSERT OR IGNORE INTO jobs
+    INSERT INTO jobs
       (external_id, title, company, ats_source, location, remote, posted_at,
        apply_url, job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
     VALUES
       (@external_id, @title, @company, @ats_source, @location, @remote, @posted_at,
        @apply_url, @job_type, @experience_level, @department, @description_snippet, @status, @raw_json, @first_seen_at)
+    ON CONFLICT (external_id, ats_source) DO NOTHING
+    RETURNING id
   `);
 
   let jobsNew = 0;
   const newJobIds: number[] = [];
-  const insertMany = db.transaction((jobList: Job[]) => {
-    for (const job of jobList) {
-      const result = insertJob.run({
+
+  try {
+    for (const job of jobs) {
+      const result = await insertJob.run({
         ...job,
         remote: job.remote ? 1 : 0,
       });
       if (result.changes > 0) {
         jobsNew++;
-        newJobIds.push(result.lastInsertRowid as number);
+        if (result.lastInsertRowid !== undefined) {
+          newJobIds.push(result.lastInsertRowid);
+        }
       }
     }
-  });
-
-  try {
-    insertMany(jobs);
   } catch (err: any) {
     errors.push(`DB insert error: ${err.message}`);
   }
 
   // Score newly inserted jobs based on user preferences
   try {
-    scoreNewJobs(newJobIds);
+    await scoreNewJobs(newJobIds);
   } catch (err: any) {
     errors.push(`Scoring error: ${err.message}`);
   }
 
   // Parse experience-years from descriptions for Entry Roles filtering
   try {
-    const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
-    const rows = db.prepare(
-      `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-    ).all(...newJobIds) as any[];
-    for (const row of rows) {
-      let desc = row.description_snippet || '';
-      if (row.raw_json) {
-        try {
-          const raw = JSON.parse(row.raw_json);
-          desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
-          if (typeof desc !== 'string') desc = '';
-          desc = desc.replace(/<[^>]+>/g, ' ');
-        } catch { /* use snippet */ }
-      }
-      const years = parseExperienceYears(row.title + ' ' + desc);
-      if (years !== null) {
-        expStmt.run(years, row.id);
+    if (newJobIds.length > 0) {
+      const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
+      const rows = await db.prepare(
+        `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+      ).all(...newJobIds) as any[];
+
+      for (const row of rows) {
+        let desc = row.description_snippet || '';
+        if (row.raw_json) {
+          try {
+            const raw = JSON.parse(row.raw_json);
+            desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
+            if (typeof desc !== 'string') desc = '';
+            desc = desc.replace(/<[^>]+>/g, ' ');
+          } catch {
+            // use snippet
+          }
+        }
+
+        const years = parseExperienceYears(`${row.title} ${desc}`);
+        if (years !== null) {
+          await expStmt.run(years, row.id);
+        }
       }
     }
   } catch (err: any) {
@@ -141,22 +147,23 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
 
   // Flag OPT-friendly companies and set sponsor tier for new jobs
   try {
-    const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ? WHERE id = ?');
-    const optRows = db.prepare(
-      `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-    ).all(...newJobIds) as { id: number; company: string }[];
-    db.transaction(() => {
+    if (newJobIds.length > 0) {
+      const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ? WHERE id = ?');
+      const optRows = await db.prepare(
+        `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+      ).all(...newJobIds) as { id: number; company: string }[];
+
       for (const row of optRows) {
         const tier = getSponsorTier(row.company);
-        optStmt.run(tier ? 1 : 0, tier, row.id);
+        await optStmt.run(tier ? 1 : 0, tier, row.id);
       }
-    })();
+    }
   } catch (err: any) {
     errors.push(`OPT flagging error: ${err.message}`);
   }
 
   const finishedAt = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, errors = ?, status = 'completed'
     WHERE id = ?
   `).run(finishedAt, jobs.length, jobsNew, errors.join('; '), runId);
@@ -180,9 +187,10 @@ export async function runJSearchCollection(hoursBack: number = 48): Promise<RunR
   const startedAt = new Date().toISOString();
   const errors: string[] = [];
 
-  const insertRun = db.prepare(`INSERT INTO runs (started_at, status) VALUES (?, 'running')`);
-  const runResult = insertRun.run(startedAt);
-  const runId = runResult.lastInsertRowid as number;
+  const runResult = await db.prepare(
+    `INSERT INTO runs (started_at, status) VALUES (?, 'running') RETURNING id`
+  ).run(startedAt);
+  const runId = runResult.lastInsertRowid ?? -1;
 
   console.log(`[JSearch] Run #${runId} started`);
 
@@ -193,73 +201,92 @@ export async function runJSearchCollection(hoursBack: number = 48): Promise<RunR
     errors.push(err.message);
   }
 
-  // Deduplicate
   jobs = deduplicateJobs(jobs);
 
   const insertJob = db.prepare(`
-    INSERT OR IGNORE INTO jobs
+    INSERT INTO jobs
       (external_id, title, company, ats_source, location, remote, posted_at,
        apply_url, job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
     VALUES
       (@external_id, @title, @company, @ats_source, @location, @remote, @posted_at,
        @apply_url, @job_type, @experience_level, @department, @description_snippet, @status, @raw_json, @first_seen_at)
+    ON CONFLICT (external_id, ats_source) DO NOTHING
+    RETURNING id
   `);
 
   let jobsNew = 0;
   const newJobIds: number[] = [];
-  const insertMany = db.transaction((jobList: Job[]) => {
-    for (const job of jobList) {
-      const result = insertJob.run({ ...job, remote: job.remote ? 1 : 0 });
-      if (result.changes > 0) {
-        jobsNew++;
-        newJobIds.push(result.lastInsertRowid as number);
-      }
-    }
-  });
 
   try {
-    insertMany(jobs);
+    for (const job of jobs) {
+      const result = await insertJob.run({
+        ...job,
+        remote: job.remote ? 1 : 0,
+      });
+      if (result.changes > 0) {
+        jobsNew++;
+        if (result.lastInsertRowid !== undefined) {
+          newJobIds.push(result.lastInsertRowid);
+        }
+      }
+    }
   } catch (err: any) {
     errors.push(`DB insert error: ${err.message}`);
   }
 
-  try { scoreNewJobs(newJobIds); } catch (err: any) { errors.push(`Scoring error: ${err.message}`); }
+  try {
+    await scoreNewJobs(newJobIds);
+  } catch (err: any) {
+    errors.push(`Scoring error: ${err.message}`);
+  }
 
   try {
-    const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
-    const rows = db.prepare(
-      `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-    ).all(...newJobIds) as any[];
-    for (const row of rows) {
-      let desc = row.description_snippet || '';
-      if (row.raw_json) {
-        try {
-          const raw = JSON.parse(row.raw_json);
-          desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
-          if (typeof desc !== 'string') desc = '';
-          desc = desc.replace(/<[^>]+>/g, ' ');
-        } catch { /* use snippet */ }
+    if (newJobIds.length > 0) {
+      const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
+      const rows = await db.prepare(
+        `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+      ).all(...newJobIds) as any[];
+
+      for (const row of rows) {
+        let desc = row.description_snippet || '';
+        if (row.raw_json) {
+          try {
+            const raw = JSON.parse(row.raw_json);
+            desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
+            if (typeof desc !== 'string') desc = '';
+            desc = desc.replace(/<[^>]+>/g, ' ');
+          } catch {
+            // use snippet
+          }
+        }
+        const years = parseExperienceYears(`${row.title} ${desc}`);
+        if (years !== null) {
+          await expStmt.run(years, row.id);
+        }
       }
-      const years = parseExperienceYears(row.title + ' ' + desc);
-      if (years !== null) expStmt.run(years, row.id);
     }
-  } catch (err: any) { errors.push(`Experience parsing error: ${err.message}`); }
+  } catch (err: any) {
+    errors.push(`Experience parsing error: ${err.message}`);
+  }
 
   try {
-    const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ? WHERE id = ?');
-    const optRows = db.prepare(
-      `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-    ).all(...newJobIds) as { id: number; company: string }[];
-    db.transaction(() => {
+    if (newJobIds.length > 0) {
+      const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ? WHERE id = ?');
+      const optRows = await db.prepare(
+        `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+      ).all(...newJobIds) as { id: number; company: string }[];
+
       for (const row of optRows) {
         const tier = getSponsorTier(row.company);
-        optStmt.run(tier ? 1 : 0, tier, row.id);
+        await optStmt.run(tier ? 1 : 0, tier, row.id);
       }
-    })();
-  } catch (err: any) { errors.push(`OPT flagging error: ${err.message}`); }
+    }
+  } catch (err: any) {
+    errors.push(`OPT flagging error: ${err.message}`);
+  }
 
   const finishedAt = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, errors = ?, status = 'completed'
     WHERE id = ?
   `).run(finishedAt, jobs.length, jobsNew, errors.join('; '), runId);

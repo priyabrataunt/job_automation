@@ -3,9 +3,9 @@ import { runCollection } from './orchestrator';
 import { sendDigestPush } from './push';
 import db from './db/database';
 
-export function purgeOldJobs(): number {
+export async function purgeOldJobs(): Promise<number> {
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-  const result = db.prepare(
+  const result = await db.prepare(
     `DELETE FROM jobs WHERE posted_at < ? AND status NOT IN ('saved', 'applied')`
   ).run(cutoff);
   return result.changes;
@@ -27,8 +27,8 @@ export function startScheduler(): void {
   });
 
   // Every hour: purge jobs older than 48h
-  cron.schedule('0 * * * *', () => {
-    const removed = purgeOldJobs();
+  cron.schedule('0 * * * *', async () => {
+    const removed = await purgeOldJobs();
     if (removed > 0) console.log(`[Scheduler] Purged ${removed} jobs older than 48h`);
   });
 
