@@ -951,16 +951,24 @@ Guidelines:
     });
 
     // POST /api/jobs/:id/queue — add job to queue (assign next queue_position)
+    // Uses a subquery so the MAX read and the UPDATE are a single atomic statement,
+    // eliminating the race condition that existed with a separate SELECT + UPDATE.
     app.post('/api/jobs/:id/queue', async (request, reply) => {
         const { id } = request.params as { id: string };
-        const maxRow = await db.prepare(
-            `SELECT COALESCE(MAX(queue_position), 0) AS max_pos FROM jobs WHERE status = 'queued'`
-        ).get() as any;
-        const nextPos = (Number(maxRow?.max_pos) || 0) + 1;
-        await db.prepare(
-            `UPDATE jobs SET status = 'queued', queue_position = ?, status_updated_at = NOW() WHERE id = ?`
-        ).run(nextPos, parseInt(id));
-        return reply.send({ ok: true, queue_position: nextPos });
+        const jobId = parseInt(id);
+        const row = await db.prepare(
+            `UPDATE jobs
+             SET status = 'queued',
+                 queue_position = (
+                   SELECT COALESCE(MAX(q.queue_position), 0) + 1
+                   FROM jobs q
+                   WHERE q.status = 'queued' AND q.id != ?
+                 ),
+                 status_updated_at = NOW()
+             WHERE id = ?
+             RETURNING queue_position`
+        ).get<{ queue_position: number }>(jobId, jobId);
+        return reply.send({ ok: true, queue_position: row?.queue_position ?? 1 });
     });
 
     // DELETE /api/jobs/:id/queue — remove from queue (restore to saved)
@@ -973,15 +981,37 @@ Guidelines:
     });
 
     // PATCH /api/jobs/:id/queue-position — reorder within queue
+    // Shifts the surrounding jobs to keep positions contiguous and unique.
     app.patch('/api/jobs/:id/queue-position', async (request, reply) => {
         const { id } = request.params as { id: string };
         const { position } = request.body as { position: number };
-        if (typeof position !== 'number') {
-            return reply.code(400).send({ error: 'position must be a number' });
+        if (typeof position !== 'number' || position < 1) {
+            return reply.code(400).send({ error: 'position must be a positive number' });
         }
-        await db.prepare(
-            `UPDATE jobs SET queue_position = ? WHERE id = ? AND status = 'queued'`
-        ).run(position, parseInt(id));
+        const jobId = parseInt(id);
+        const current = await db.prepare(
+            `SELECT queue_position FROM jobs WHERE id = ? AND status = 'queued'`
+        ).get<{ queue_position: number }>(jobId);
+        if (!current) return reply.code(404).send({ error: 'job not found in queue' });
+        const currentPos = current.queue_position;
+        if (currentPos !== position) {
+            if (position < currentPos) {
+                // Moving up: push jobs in [newPos, currentPos) down by one
+                await db.prepare(
+                    `UPDATE jobs SET queue_position = queue_position + 1
+                     WHERE status = 'queued' AND id != ? AND queue_position >= ? AND queue_position < ?`
+                ).run(jobId, position, currentPos);
+            } else {
+                // Moving down: pull jobs in (currentPos, newPos] up by one
+                await db.prepare(
+                    `UPDATE jobs SET queue_position = queue_position - 1
+                     WHERE status = 'queued' AND id != ? AND queue_position > ? AND queue_position <= ?`
+                ).run(jobId, currentPos, position);
+            }
+            await db.prepare(
+                `UPDATE jobs SET queue_position = ? WHERE id = ?`
+            ).run(position, jobId);
+        }
         return reply.send({ ok: true });
     });
 
@@ -1001,5 +1031,26 @@ Guidelines:
             ).run(nextPos++, id);
         }
         return reply.send({ ok: true, queued: ids.length });
+    });
+
+    // ── Answer Cache Endpoints ─────────────────────────────────────────────────
+    // GET /api/cache/lookup — look up a cached answer by question hash
+    // Used by the Playwright form engine (playwright/src/form-engine.ts).
+    app.get('/api/cache/lookup', async (request, reply) => {
+        const { hash } = request.query as { hash?: string };
+        if (!hash) return reply.code(400).send({ error: 'hash query param is required' });
+        const row = await db.prepare(
+            `SELECT answer, confidence FROM answer_cache
+             WHERE question_hash = ?
+             ORDER BY confidence DESC, last_used_at DESC NULLS LAST
+             LIMIT 1`
+        ).get<{ answer: string; confidence: number }>(hash);
+        if (!row) return reply.code(404).send({ error: 'not found' });
+        // Bump usage counter without blocking the response
+        db.prepare(
+            `UPDATE answer_cache SET times_used = times_used + 1, last_used_at = NOW()
+             WHERE question_hash = ?`
+        ).run(hash).catch(() => {});
+        return reply.send({ answer: row.answer, confidence: row.confidence });
     });
 }

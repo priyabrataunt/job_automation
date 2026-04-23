@@ -1,4 +1,4 @@
-import { Pool, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResultRow } from 'pg';
 import { COMPANIES as WORKDAY_COMPANIES } from '../collectors/workday';
 import { parseExperienceYears, detectExperienceLevel } from '../collectors/filters';
 import { isOptFriendly, getSponsorTier } from '../data/opt-friendly-companies';
@@ -80,6 +80,48 @@ const db = {
     await pool.query(normalizeSql(sql));
   },
 
+  /**
+   * Run `fn` inside a real Postgres transaction on a dedicated connection.
+   * `fn` receives a db-like object whose queries run on the transaction client,
+   * so BEGIN/COMMIT/ROLLBACK are fully honoured.
+   */
+  async withTransaction<T>(fn: (txDb: { prepare: (sql: string) => PreparedStatement; exec: (sql: string) => Promise<void> }) => Promise<T>): Promise<T> {
+    const client: PoolClient = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const txExec = async (sql: string) => { await client.query(normalizeSql(sql)); };
+
+      const txPrepare = (sql: string): PreparedStatement => ({
+        async get<R extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<R | undefined> {
+          const { text, values } = buildQuery(sql, params);
+          const result = await client.query<R>(text, values);
+          return result.rows[0];
+        },
+        async all<R extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<R[]> {
+          const { text, values } = buildQuery(sql, params);
+          const result = await client.query<R>(text, values);
+          return result.rows;
+        },
+        async run(...params: any[]): Promise<RunResult> {
+          const { text, values } = buildQuery(sql, params);
+          const result = await client.query(text, values);
+          return { changes: result.rowCount ?? 0 };
+        },
+      });
+
+      const result = await fn({ prepare: txPrepare, exec: txExec });
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  /** @deprecated Use withTransaction instead — this wrapper does not provide real atomicity. */
   transaction<T extends any[]>(fn: (...args: T) => Promise<void> | void): (...args: T) => Promise<void> {
     return async (...args: T): Promise<void> => {
       await fn(...args);
