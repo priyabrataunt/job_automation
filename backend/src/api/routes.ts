@@ -937,4 +937,69 @@ Guidelines:
     app.get('/health', async (_request, reply) => {
         return reply.send({ status: 'ok' });
     });
+
+    // ── Queue Endpoints ────────────────────────────────────────────────────────
+    // GET /api/jobs/queue — return queued jobs ordered by queue_position
+    app.get('/api/jobs/queue', async (_request, reply) => {
+        const jobs = await db.prepare(`
+      SELECT * FROM jobs
+      WHERE status = 'queued'
+        AND queue_position IS NOT NULL
+      ORDER BY queue_position ASC
+    `).all();
+        return reply.send({ jobs, total: jobs.length });
+    });
+
+    // POST /api/jobs/:id/queue — add job to queue (assign next queue_position)
+    app.post('/api/jobs/:id/queue', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const maxRow = await db.prepare(
+            `SELECT COALESCE(MAX(queue_position), 0) AS max_pos FROM jobs WHERE status = 'queued'`
+        ).get() as any;
+        const nextPos = (Number(maxRow?.max_pos) || 0) + 1;
+        await db.prepare(
+            `UPDATE jobs SET status = 'queued', queue_position = ?, status_updated_at = NOW() WHERE id = ?`
+        ).run(nextPos, parseInt(id));
+        return reply.send({ ok: true, queue_position: nextPos });
+    });
+
+    // DELETE /api/jobs/:id/queue — remove from queue (restore to saved)
+    app.delete('/api/jobs/:id/queue', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        await db.prepare(
+            `UPDATE jobs SET status = 'saved', queue_position = NULL, status_updated_at = NOW() WHERE id = ?`
+        ).run(parseInt(id));
+        return reply.send({ ok: true });
+    });
+
+    // PATCH /api/jobs/:id/queue-position — reorder within queue
+    app.patch('/api/jobs/:id/queue-position', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const { position } = request.body as { position: number };
+        if (typeof position !== 'number') {
+            return reply.code(400).send({ error: 'position must be a number' });
+        }
+        await db.prepare(
+            `UPDATE jobs SET queue_position = ? WHERE id = ? AND status = 'queued'`
+        ).run(position, parseInt(id));
+        return reply.send({ ok: true });
+    });
+
+    // POST /api/jobs/bulk-queue — queue multiple jobs at once
+    app.post('/api/jobs/bulk-queue', async (request, reply) => {
+        const { ids } = request.body as { ids: number[] };
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return reply.code(400).send({ error: 'ids array is required' });
+        }
+        const maxRow = await db.prepare(
+            `SELECT COALESCE(MAX(queue_position), 0) AS max_pos FROM jobs WHERE status = 'queued'`
+        ).get() as any;
+        let nextPos = (Number(maxRow?.max_pos) || 0) + 1;
+        for (const id of ids) {
+            await db.prepare(
+                `UPDATE jobs SET status = 'queued', queue_position = ?, status_updated_at = NOW() WHERE id = ?`
+            ).run(nextPos++, id);
+        }
+        return reply.send({ ok: true, queued: ids.length });
+    });
 }

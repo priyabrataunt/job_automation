@@ -1,0 +1,23 @@
+{
+  "name": "job-automation-playwright",
+  "version": "1.0.0",
+  "description": "Playwright batch application engine for job automation",
+  "main": "dist/engine.js",
+  "scripts": {
+    "apply-batch": "ts-node --project tsconfig.json src/engine.ts",
+    "build": "tsc",
+    "start": "node dist/engine.js",
+    "postinstall": "playwright install chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

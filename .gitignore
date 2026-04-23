@@ -1,6 +1,7 @@
 .claude
 backend/node_modules
 frontend/node_modules
+playwright/node_modules
 
 # Environment / secrets
 .env

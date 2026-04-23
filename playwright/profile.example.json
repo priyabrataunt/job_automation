@@ -1,0 +1,35 @@
+{
+  "personal": {
+    "name": "Your Full Name",
+    "email": "you@example.com",
+    "phone": "+1-555-000-0000",
+    "linkedin": "https://linkedin.com/in/yourprofile",
+    "github": "https://github.com/yourusername",
+    "portfolio": "https://yourportfolio.com",
+    "address": {
+      "street": "123 Main St",
+      "city": "San Francisco",
+      "state": "CA",
+      "zip": "94105",
+      "country": "United States"
+    }
+  },
+  "visa": {
+    "status": "OPT",
+    "opt_expiry": "2027-05-01"
+  },
+  "work_auth_answers": {
+    "authorized_to_work": "Yes",
+    "require_sponsorship_now": "No",
+    "require_sponsorship_future": "Yes"
+  },
+  "answers": {
+    "years_experience": "2",
+    "highest_education": "Bachelor's Degree",
+    "degree_field": "Computer Science",
+    "salary_expectation": "120000",
+    "notice_period": "2 weeks",
+    "pronouns": "He/Him"
+  },
+  "resume_path": "~/.job-automation/resume.pdf"
+}
