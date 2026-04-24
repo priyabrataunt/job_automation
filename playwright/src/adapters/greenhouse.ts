@@ -95,6 +95,8 @@ export const greenhouse: PlatformAdapter = {
       selector: string;
       options: string[];
       required: boolean;
+      name: string | null;
+      id: string | null;
     };
 
     const fieldInfos: FieldInfo[] = await page.evaluate(() => {
@@ -156,9 +158,17 @@ export const greenhouse: PlatformAdapter = {
         if (!labelText) {
           let node: Element | null = el.parentElement;
           while (node) {
-            if (node.tagName === 'LABEL') { labelText = node.textContent?.trim() ?? ''; break; }
-            const lbl = node.querySelector('label');
-            if (lbl) { labelText = lbl.textContent?.trim() ?? ''; break; }
+            if (node.tagName === 'LABEL') {
+              labelText = node.textContent?.trim() ?? '';
+              break;
+            }
+            const labels = node.querySelectorAll('label');
+            if (labels.length === 1) {
+              labelText = labels[0].textContent?.trim() ?? '';
+              break;
+            }
+            // Stop at field container boundaries
+            if (['FIELDSET', 'LI', 'DD', 'SECTION', 'FORM'].includes(node.tagName)) break;
             node = node.parentElement;
           }
         }
@@ -176,6 +186,8 @@ export const greenhouse: PlatformAdapter = {
           selector,
           options,
           required: (el as HTMLInputElement).required ?? false,
+          name: (el as HTMLInputElement).name || null,
+          id: el.id || null,
         });
       }
 
@@ -234,35 +246,31 @@ export const greenhouse: PlatformAdapter = {
           }
 
           case 'radio': {
-            // Greenhouse renders: <input type="radio"> with sibling/parent <label>
-            // Click the label whose text contains the resolved value
-            const clicked = await page.evaluate(
-              ({ sel, val }: { sel: string; val: string }) => {
-                // Find all radio inputs with the same name
-                const sample = document.querySelector(sel) as HTMLInputElement | null;
-                if (!sample) return false;
-                const name = sample.name;
-                const radios = name
-                  ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
-                  : [sample];
-
-                for (const radio of radios) {
-                  // Try label[for=id] first
-                  const lbl = radio.id
-                    ? (document.querySelector(`label[for="${radio.id}"]`) as HTMLElement | null)
-                    : null;
-                  const labelText = lbl?.textContent?.trim() ?? radio.value;
-                  if (labelText.toLowerCase().includes(val.toLowerCase())) {
-                    (lbl ?? radio).click();
-                    return true;
-                  }
-                }
-                return false;
-              },
-              { sel: info.selector, val: result.value },
-            );
+            const radios = page.locator(`input[type="radio"][name="${info.name || info.id}"]`);
+            const count = await radios.count();
+            let clicked = false;
+            for (let ri = 0; ri < count; ri++) {
+              const radio = radios.nth(ri);
+              // Get label text for this radio
+              const labelText = await radio.evaluate((el: HTMLInputElement) => {
+                const forLabel = el.id
+                  ? document.querySelector<HTMLLabelElement>(`label[for="${el.id}"]`)
+                  : null;
+                return forLabel?.textContent?.trim()
+                  ?? el.value
+                  ?? '';
+              });
+              if (labelText.toLowerCase().includes(result.value.toLowerCase()) ||
+                  result.value.toLowerCase().includes(labelText.toLowerCase())) {
+                await radio.click();
+                clicked = true;
+                break;
+              }
+            }
             if (!clicked) {
-              console.warn(`[greenhouse] Could not click radio "${result.value}" for "${result.label}"`);
+              // Fallback: try clicking by value attribute
+              const byValue = page.locator(`input[type="radio"][value="${result.value}"]`).first();
+              if (await byValue.count() > 0) await byValue.click();
             }
             break;
           }
@@ -295,25 +303,33 @@ export const greenhouse: PlatformAdapter = {
   async handleMultiStep(page: Page): Promise<boolean> {
     try {
       // Look for a Next / Continue button that is NOT Submit
-      const nextButton = page.locator(
-        'button:not([type="submit"]):is(:text-matches("next|continue", "i")), ' +
-        'input[type="button"]:is([value*="Next" i], [value*="Continue" i])',
-      ).first();
+      const nextButton = page
+        .locator('button:not([type="submit"])')
+        .filter({ hasText: /next|continue/i })
+        .first();
 
-      const count = await nextButton.count();
-      if (count === 0) return false;
+      const nextInput = page
+        .locator('input[type="button"]')
+        .filter({ hasText: /next|continue/i })
+        .first();
 
-      const isDisabled = await nextButton.evaluate(
+      const buttonCount = await nextButton.count();
+      const inputCount = await nextInput.count();
+      if (buttonCount === 0 && inputCount === 0) return false;
+      const toClick = buttonCount > 0 ? nextButton : nextInput;
+
+      const isDisabled = await toClick.evaluate(
         el => (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true',
       );
       if (isDisabled) return false;
 
-      await nextButton.click();
+      await toClick.click();
 
       // Wait for DOM change or navigation
+      await page.waitForTimeout(300);
       await Promise.race([
         page.waitForNavigation({ timeout: 5000 }).catch(() => null),
-        page.waitForSelector('form', { timeout: 5000 }).catch(() => null),
+        page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => null),
       ]);
 
       return true;
