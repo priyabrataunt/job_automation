@@ -2,54 +2,6 @@ import type { Page, ElementHandle } from 'playwright';
 import type { FormEngine } from '../form-engine';
 import type { PlatformAdapter, QueuedJob, FormField, FillResult, FieldType } from '../types';
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-/**
- * Attempt to extract a human-readable label for a form element.
- * Priority order:
- *   1. <label for="..."> pointing to the element's id
- *   2. aria-label attribute
- *   3. Nearest ancestor <label> or <div class="field"> containing a <label>
- */
-async function extractLabel(page: Page, elementId: string | null, selector: string): Promise<string> {
-  try {
-    if (elementId) {
-      // 1. Standard label[for=id]
-      const labelText = await page.evaluate((id: string) => {
-        const label = document.querySelector(`label[for="${id}"]`);
-        return label?.textContent?.trim() ?? null;
-      }, elementId);
-      if (labelText) return labelText;
-    }
-
-    // 2. aria-label
-    const ariaLabel = await page.evaluate((sel: string) => {
-      const el = document.querySelector(sel);
-      return el?.getAttribute('aria-label')?.trim() ?? null;
-    }, selector);
-    if (ariaLabel) return ariaLabel;
-
-    // 3. Nearest ancestor label or div.field > label
-    const ancestorLabel = await page.evaluate((sel: string) => {
-      const el = document.querySelector(sel);
-      if (!el) return null;
-      // Walk up the DOM
-      let node: Element | null = el.parentElement;
-      while (node) {
-        if (node.tagName === 'LABEL') return node.textContent?.trim() ?? null;
-        const label = node.querySelector('label');
-        if (label) return label.textContent?.trim() ?? null;
-        node = node.parentElement;
-      }
-      return null;
-    }, selector);
-    if (ancestorLabel) return ancestorLabel;
-  } catch {
-    // ignore
-  }
-  return '';
-}
-
 // ── Greenhouse Adapter ─────────────────────────────────────────────────────────
 
 export const greenhouse: PlatformAdapter = {
