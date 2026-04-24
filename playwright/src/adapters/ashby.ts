@@ -20,7 +20,6 @@ export const ashby: PlatformAdapter = {
       const domMatch = await page.evaluate(() => {
         if (document.querySelector('[data-ashby-app]')) return true;
         if (document.querySelector('[data-ashby]')) return true;
-        if (document.body.innerHTML.includes('data-ashby')) return true;
         return false;
       });
       return domMatch;
@@ -45,6 +44,10 @@ export const ashby: PlatformAdapter = {
       label: string;
       type: FieldType;
       selector: string;
+      /** Base ARIA selector (without positional suffix) for ARIA elements that use nthIndex */
+      ariaBase: string | null;
+      /** Per-type nth index for ARIA elements that have no unique id/name */
+      nthIndex: number | null;
       options: string[];
       required: boolean;
       id: string | null;
@@ -53,7 +56,7 @@ export const ashby: PlatformAdapter = {
     };
 
     const fieldInfos: FieldInfo[] = await page.evaluate(() => {
-      const results: FieldInfo[] = [];
+      const results = [];
 
       // Standard inputs
       const standardInputs = Array.from(
@@ -90,6 +93,10 @@ export const ashby: PlatformAdapter = {
       ];
 
       let globalIndex = 0;
+      // Per-type counters for .nth() positioning of ARIA elements
+      let comboboxIndex = 0;
+      let radiogroupIndex = 0;
+      let checkboxAriaIndex = 0;
 
       for (const { el, customType } of allElements) {
         const tag = el.tagName.toLowerCase();
@@ -114,20 +121,47 @@ export const ashby: PlatformAdapter = {
 
         // Build a unique selector
         const id = el.id || null;
+        const ariaLabel = el.getAttribute('aria-label')?.trim() || null;
         const name = (el as HTMLInputElement).name || null;
         let selector = '';
+        let ariaBase: string | null = null;
+        let nthIndex: number | null = null;
 
         if (customType === 'combobox') {
           const role = el.getAttribute('role');
-          if (role === 'combobox') {
-            selector = id ? `div[role="combobox"]#${id}` : `div[role="combobox"]:nth-of-type(${globalIndex + 1})`;
+          const baseSelector = role === 'combobox' ? 'div[role="combobox"]' : 'button[aria-haspopup="listbox"]';
+          if (id) {
+            selector = `${baseSelector}#${id}`;
+          } else if (ariaLabel) {
+            selector = `${baseSelector}[aria-label="${ariaLabel}"]`;
           } else {
-            selector = id ? `button[aria-haspopup="listbox"]#${id}` : `button[aria-haspopup="listbox"]:nth-of-type(${globalIndex + 1})`;
+            ariaBase = baseSelector;
+            nthIndex = comboboxIndex;
+            selector = baseSelector; // placeholder; interaction uses .nth(nthIndex)
           }
+          comboboxIndex++;
         } else if (customType === 'radiogroup') {
-          selector = id ? `div[role="radiogroup"]#${id}` : `div[role="radiogroup"]:nth-of-type(${globalIndex + 1})`;
+          if (id) {
+            selector = `div[role="radiogroup"]#${id}`;
+          } else if (ariaLabel) {
+            selector = `div[role="radiogroup"][aria-label="${ariaLabel}"]`;
+          } else {
+            ariaBase = 'div[role="radiogroup"]';
+            nthIndex = radiogroupIndex;
+            selector = 'div[role="radiogroup"]';
+          }
+          radiogroupIndex++;
         } else if (customType === 'checkbox') {
-          selector = id ? `div[role="checkbox"]#${id}` : `div[role="checkbox"]:nth-of-type(${globalIndex + 1})`;
+          if (id) {
+            selector = `div[role="checkbox"]#${id}`;
+          } else if (ariaLabel) {
+            selector = `div[role="checkbox"][aria-label="${ariaLabel}"]`;
+          } else {
+            ariaBase = 'div[role="checkbox"]';
+            nthIndex = checkboxAriaIndex;
+            selector = 'div[role="checkbox"]';
+          }
+          checkboxAriaIndex++;
         } else if (id) {
           selector = `#${id}`;
         } else if (name) {
@@ -204,6 +238,8 @@ export const ashby: PlatformAdapter = {
           label: labelText,
           type: fieldType,
           selector,
+          ariaBase,
+          nthIndex,
           options,
           required: (el as HTMLInputElement).required ?? el.getAttribute('aria-required') === 'true',
           id,
@@ -256,8 +292,12 @@ export const ashby: PlatformAdapter = {
 
           case 'select': {
             // Custom Ashby dropdown: click to open → wait for listbox → click matching option
+            // Use .nth() for ARIA elements that had no unique id/aria-label
+            const selectLocator = info.ariaBase !== null && info.nthIndex !== null
+              ? page.locator(info.ariaBase).nth(info.nthIndex)
+              : page.locator(info.selector);
             try {
-              await page.locator(info.selector).click();
+              await selectLocator.click();
               await page.waitForSelector('[role="listbox"]', { timeout: 3000 });
 
               // Find matching option in the listbox
@@ -296,8 +336,10 @@ export const ashby: PlatformAdapter = {
 
           case 'radio': {
             // Ashby radio groups use div[role="radiogroup"] with div[role="radio"] children
-            await page
-              .locator(info.selector)
+            const radioLocator = info.ariaBase !== null && info.nthIndex !== null
+              ? page.locator(info.ariaBase).nth(info.nthIndex)
+              : page.locator(info.selector);
+            await radioLocator
               .locator('div[role="radio"]')
               .filter({ hasText: result.value })
               .first()
@@ -308,7 +350,9 @@ export const ashby: PlatformAdapter = {
           case 'checkbox': {
             const truthy = /^(yes|true|1)$/i.test(result.value.trim());
             if (truthy) {
-              const checkbox = page.locator(info.selector).first();
+              const checkbox = info.ariaBase !== null && info.nthIndex !== null
+                ? page.locator(info.ariaBase).nth(info.nthIndex)
+                : page.locator(info.selector).first();
               const isChecked = (await checkbox.getAttribute('aria-checked')) === 'true';
               if (!isChecked) await checkbox.click();
             }

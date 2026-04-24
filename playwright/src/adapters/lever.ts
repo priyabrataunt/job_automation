@@ -51,7 +51,7 @@ export const lever: PlatformAdapter = {
     };
 
     const fieldInfos: FieldInfo[] = await page.evaluate(() => {
-      const results: FieldInfo[] = [];
+      const results = [];
 
       const inputs = Array.from(
         document.querySelectorAll<HTMLElement>(
@@ -195,7 +195,9 @@ export const lever: PlatformAdapter = {
           }
 
           case 'radio': {
-            const radios = page.locator(`input[type="radio"][name="${info.name || info.id}"]`);
+            const radios = info.name
+              ? page.locator(`input[type="radio"][name="${info.name}"]`)
+              : page.locator(`input[type="radio"][id="${info.id}"]`);
             const count = await radios.count();
             let clicked = false;
             for (let ri = 0; ri < count; ri++) {
@@ -225,10 +227,8 @@ export const lever: PlatformAdapter = {
           case 'checkbox': {
             const truthy = /^(yes|true|1)$/i.test(result.value.trim());
             if (truthy) {
-              const isChecked = await page.evaluate((sel: string) => {
-                return (document.querySelector(sel) as HTMLInputElement)?.checked ?? false;
-              }, info.selector);
-              if (!isChecked) await page.click(info.selector);
+              const isChecked = await page.locator(info.selector).isChecked().catch(() => false);
+              if (!isChecked) await page.locator(info.selector).click();
             }
             break;
           }
