@@ -1,0 +1,353 @@
+import type { Page, ElementHandle } from 'playwright';
+import type { FormEngine } from '../form-engine';
+import type { PlatformAdapter, QueuedJob, FormField, FillResult, FieldType } from '../types';
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Attempt to extract a human-readable label for a form element.
+ * Priority order:
+ *   1. <label for="..."> pointing to the element's id
+ *   2. aria-label attribute
+ *   3. Nearest ancestor <label> or <div class="field"> containing a <label>
+ */
+async function extractLabel(page: Page, elementId: string | null, selector: string): Promise<string> {
+  try {
+    if (elementId) {
+      // 1. Standard label[for=id]
+      const labelText = await page.evaluate((id: string) => {
+        const label = document.querySelector(`label[for="${id}"]`);
+        return label?.textContent?.trim() ?? null;
+      }, elementId);
+      if (labelText) return labelText;
+    }
+
+    // 2. aria-label
+    const ariaLabel = await page.evaluate((sel: string) => {
+      const el = document.querySelector(sel);
+      return el?.getAttribute('aria-label')?.trim() ?? null;
+    }, selector);
+    if (ariaLabel) return ariaLabel;
+
+    // 3. Nearest ancestor label or div.field > label
+    const ancestorLabel = await page.evaluate((sel: string) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      // Walk up the DOM
+      let node: Element | null = el.parentElement;
+      while (node) {
+        if (node.tagName === 'LABEL') return node.textContent?.trim() ?? null;
+        const label = node.querySelector('label');
+        if (label) return label.textContent?.trim() ?? null;
+        node = node.parentElement;
+      }
+      return null;
+    }, selector);
+    if (ancestorLabel) return ancestorLabel;
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
+// ── Greenhouse Adapter ─────────────────────────────────────────────────────────
+
+export const greenhouse: PlatformAdapter = {
+  name: 'greenhouse',
+
+  // ── Detection ───────────────────────────────────────────────────────────────
+
+  async detect(page: Page): Promise<boolean> {
+    try {
+      const url = page.url();
+      if (url.includes('boards.greenhouse.io') || url.includes('job-boards.greenhouse.io')) {
+        return true;
+      }
+
+      // DOM-based signals
+      const domMatch = await page.evaluate(() => {
+        if (document.querySelector('[data-source="greenhouse"]')) return true;
+        if (document.querySelector('#app_body .application')) return true;
+        if (document.title.toLowerCase().includes('greenhouse')) return true;
+        return false;
+      });
+      return domMatch;
+    } catch {
+      return false;
+    }
+  },
+
+  // ── Form Filling ─────────────────────────────────────────────────────────────
+
+  async fillForm(page: Page, engine: FormEngine, job: QueuedJob): Promise<FillResult[]> {
+    // Wait for the form to be ready
+    try {
+      await page.waitForSelector('form', { timeout: 10000 });
+    } catch {
+      console.warn('[greenhouse] No <form> found within 10s');
+      return [];
+    }
+
+    // ── Scan all relevant form elements ───────────────────────────────────────
+    type FieldInfo = {
+      label: string;
+      type: FieldType;
+      selector: string;
+      options: string[];
+      required: boolean;
+    };
+
+    const fieldInfos: FieldInfo[] = await page.evaluate(() => {
+      const results: FieldInfo[] = [];
+
+      const inputs = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]), ' +
+          'textarea, ' +
+          'select, ' +
+          'div[role="combobox"]',
+        ),
+      );
+
+      for (const el of inputs) {
+        const tag = el.tagName.toLowerCase();
+        const inputType = (el as HTMLInputElement).type?.toLowerCase() ?? '';
+
+        let fieldType: FieldType;
+        if (tag === 'textarea') {
+          fieldType = 'textarea';
+        } else if (tag === 'select' || el.getAttribute('role') === 'combobox') {
+          fieldType = 'select';
+        } else if (inputType === 'radio') {
+          fieldType = 'radio';
+        } else if (inputType === 'checkbox') {
+          fieldType = 'checkbox';
+        } else {
+          fieldType = 'text';
+        }
+
+        // Build a unique selector
+        const id = el.id || null;
+        let selector = '';
+        if (id) {
+          selector = `#${id}`;
+        } else {
+          // Use a data attribute or nth-of-type fallback — just mark for later
+          const name = (el as HTMLInputElement).name;
+          if (name) {
+            selector = `[name="${name}"]`;
+          } else {
+            // Will be skipped for now; real impl can use index
+            selector = '';
+          }
+        }
+
+        if (!selector) continue;
+
+        // Label extraction (inline — no page.evaluate re-entry needed)
+        let labelText = '';
+        if (id) {
+          const lbl = document.querySelector(`label[for="${id}"]`);
+          if (lbl) labelText = lbl.textContent?.trim() ?? '';
+        }
+        if (!labelText) {
+          labelText = el.getAttribute('aria-label')?.trim() ?? '';
+        }
+        if (!labelText) {
+          let node: Element | null = el.parentElement;
+          while (node) {
+            if (node.tagName === 'LABEL') { labelText = node.textContent?.trim() ?? ''; break; }
+            const lbl = node.querySelector('label');
+            if (lbl) { labelText = lbl.textContent?.trim() ?? ''; break; }
+            node = node.parentElement;
+          }
+        }
+        if (!labelText) continue; // skip unlabelled fields
+
+        // Options for select / radio / checkbox
+        let options: string[] = [];
+        if (tag === 'select') {
+          options = Array.from((el as HTMLSelectElement).options).map(o => o.label.trim());
+        }
+
+        results.push({
+          label: labelText,
+          type: fieldType,
+          selector,
+          options,
+          required: (el as HTMLInputElement).required ?? false,
+        });
+      }
+
+      return results;
+    });
+
+    // Deduplicate by label (radio groups share a label — keep first)
+    const seen = new Set<string>();
+    const uniqueFields: FieldInfo[] = [];
+    for (const f of fieldInfos) {
+      const key = `${f.label}::${f.type}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueFields.push(f);
+      }
+    }
+
+    // Build FormField array for the engine
+    const formFields: FormField[] = uniqueFields.map(f => ({
+      label: f.label,
+      type: f.type,
+      options: f.options.length > 0 ? f.options : undefined,
+      required: f.required,
+    }));
+
+    // Resolve all fields via the engine (profile → cache → AI)
+    const resolved = await engine.resolveFields(formFields, job.description_snippet);
+
+    // ── Apply resolved values to the page ─────────────────────────────────────
+    for (const result of resolved) {
+      if (result.source === 'unfilled' || !result.value) continue;
+
+      const info = uniqueFields.find(f => f.label === result.label);
+      if (!info) continue;
+
+      try {
+        switch (info.type) {
+          case 'text':
+          case 'textarea': {
+            await page.fill(info.selector, result.value);
+            break;
+          }
+
+          case 'select': {
+            // Try label match first, fall back to value match
+            try {
+              await page.selectOption(info.selector, { label: result.value });
+            } catch {
+              try {
+                await page.selectOption(info.selector, { value: result.value });
+              } catch {
+                console.warn(`[greenhouse] Could not select "${result.value}" for field "${result.label}"`);
+              }
+            }
+            break;
+          }
+
+          case 'radio': {
+            // Greenhouse renders: <input type="radio"> with sibling/parent <label>
+            // Click the label whose text contains the resolved value
+            const clicked = await page.evaluate(
+              ({ sel, val }: { sel: string; val: string }) => {
+                // Find all radio inputs with the same name
+                const sample = document.querySelector(sel) as HTMLInputElement | null;
+                if (!sample) return false;
+                const name = sample.name;
+                const radios = name
+                  ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`))
+                  : [sample];
+
+                for (const radio of radios) {
+                  // Try label[for=id] first
+                  const lbl = radio.id
+                    ? (document.querySelector(`label[for="${radio.id}"]`) as HTMLElement | null)
+                    : null;
+                  const labelText = lbl?.textContent?.trim() ?? radio.value;
+                  if (labelText.toLowerCase().includes(val.toLowerCase())) {
+                    (lbl ?? radio).click();
+                    return true;
+                  }
+                }
+                return false;
+              },
+              { sel: info.selector, val: result.value },
+            );
+            if (!clicked) {
+              console.warn(`[greenhouse] Could not click radio "${result.value}" for "${result.label}"`);
+            }
+            break;
+          }
+
+          case 'checkbox': {
+            // Click if value is truthy (yes/true/1)
+            const truthy = /^(yes|true|1)$/i.test(result.value.trim());
+            if (truthy) {
+              const isChecked = await page.evaluate((sel: string) => {
+                return (document.querySelector(sel) as HTMLInputElement)?.checked ?? false;
+              }, info.selector);
+              if (!isChecked) await page.click(info.selector);
+            }
+            break;
+          }
+
+          default:
+            break;
+        }
+      } catch (err) {
+        console.warn(`[greenhouse] Failed to fill field "${result.label}":`, err);
+      }
+    }
+
+    return resolved;
+  },
+
+  // ── Multi-step handling ──────────────────────────────────────────────────────
+
+  async handleMultiStep(page: Page): Promise<boolean> {
+    try {
+      // Look for a Next / Continue button that is NOT Submit
+      const nextButton = page.locator(
+        'button:not([type="submit"]):is(:text-matches("next|continue", "i")), ' +
+        'input[type="button"]:is([value*="Next" i], [value*="Continue" i])',
+      ).first();
+
+      const count = await nextButton.count();
+      if (count === 0) return false;
+
+      const isDisabled = await nextButton.evaluate(
+        el => (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true',
+      );
+      if (isDisabled) return false;
+
+      await nextButton.click();
+
+      // Wait for DOM change or navigation
+      await Promise.race([
+        page.waitForNavigation({ timeout: 5000 }).catch(() => null),
+        page.waitForSelector('form', { timeout: 5000 }).catch(() => null),
+      ]);
+
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // ── Resume upload ────────────────────────────────────────────────────────────
+
+  async uploadResume(page: Page, filePath: string): Promise<void> {
+    const fileInput = page.locator('input[type="file"]').first();
+    await fileInput.setInputFiles(filePath);
+  },
+
+  // ── Submit button ────────────────────────────────────────────────────────────
+
+  async getSubmitButton(page: Page): Promise<ElementHandle | null> {
+    const candidates = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:text-matches("Submit Application", "i")',
+      'button:text-matches("Apply", "i")',
+      'button:text-matches("Submit", "i")',
+    ];
+
+    for (const sel of candidates) {
+      try {
+        const el = await page.$(sel);
+        if (el) return el;
+      } catch {
+        // try next candidate
+      }
+    }
+    return null;
+  },
+};
