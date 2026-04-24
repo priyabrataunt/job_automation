@@ -1,0 +1,383 @@
+import type { Page, ElementHandle } from 'playwright';
+import type { FormEngine } from '../form-engine';
+import type { PlatformAdapter, QueuedJob, FormField, FillResult, FieldType } from '../types';
+
+// ── Ashby Adapter ──────────────────────────────────────────────────────────────
+
+export const ashby: PlatformAdapter = {
+  name: 'ashby',
+
+  // ── Detection ───────────────────────────────────────────────────────────────
+
+  async detect(page: Page): Promise<boolean> {
+    try {
+      const url = page.url();
+      if (url.includes('jobs.ashbyhq.com') || url.includes('app.ashbyhq.com')) {
+        return true;
+      }
+
+      // DOM-based signals
+      const domMatch = await page.evaluate(() => {
+        if (document.querySelector('[data-ashby-app]')) return true;
+        if (document.querySelector('[data-ashby]')) return true;
+        if (document.body.innerHTML.includes('data-ashby')) return true;
+        return false;
+      });
+      return domMatch;
+    } catch {
+      return false;
+    }
+  },
+
+  // ── Form Filling ─────────────────────────────────────────────────────────────
+
+  async fillForm(page: Page, engine: FormEngine, job: QueuedJob): Promise<FillResult[]> {
+    // Wait for Ashby's React app to mount
+    try {
+      await page.waitForSelector('form, [data-ashby-app]', { timeout: 15000 });
+    } catch {
+      console.warn('[ashby] No form or [data-ashby-app] found within 15s');
+      return [];
+    }
+
+    // ── Scan all relevant form elements ───────────────────────────────────────
+    type FieldInfo = {
+      label: string;
+      type: FieldType;
+      selector: string;
+      options: string[];
+      required: boolean;
+      id: string | null;
+      name: string | null;
+      index: number;
+    };
+
+    const fieldInfos: FieldInfo[] = await page.evaluate(() => {
+      const results: FieldInfo[] = [];
+
+      // Standard inputs
+      const standardInputs = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          'input[type="text"], input[type="email"], input[type="tel"], ' +
+          'input[type="number"], input[type="url"], ' +
+          'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="file"]):not([type="radio"]):not([type="checkbox"]), ' +
+          'textarea',
+        ),
+      );
+
+      // Custom Ashby dropdowns
+      const comboboxes = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          'div[role="combobox"], button[aria-haspopup="listbox"]',
+        ),
+      );
+
+      // Radio groups
+      const radioGroups = Array.from(
+        document.querySelectorAll<HTMLElement>('div[role="radiogroup"]'),
+      );
+
+      // Checkboxes (ARIA)
+      const checkboxes = Array.from(
+        document.querySelectorAll<HTMLElement>('div[role="checkbox"]'),
+      );
+
+      const allElements: Array<{ el: HTMLElement; customType?: string }> = [
+        ...standardInputs.map(el => ({ el })),
+        ...comboboxes.map(el => ({ el, customType: 'combobox' })),
+        ...radioGroups.map(el => ({ el, customType: 'radiogroup' })),
+        ...checkboxes.map(el => ({ el, customType: 'checkbox' })),
+      ];
+
+      let globalIndex = 0;
+
+      for (const { el, customType } of allElements) {
+        const tag = el.tagName.toLowerCase();
+        const inputType = (el as HTMLInputElement).type?.toLowerCase() ?? '';
+
+        let fieldType: FieldType;
+        if (customType === 'combobox') {
+          fieldType = 'select';
+        } else if (customType === 'radiogroup') {
+          fieldType = 'radio';
+        } else if (customType === 'checkbox') {
+          fieldType = 'checkbox';
+        } else if (tag === 'textarea') {
+          fieldType = 'textarea';
+        } else if (inputType === 'radio') {
+          fieldType = 'radio';
+        } else if (inputType === 'checkbox') {
+          fieldType = 'checkbox';
+        } else {
+          fieldType = 'text';
+        }
+
+        // Build a unique selector
+        const id = el.id || null;
+        const name = (el as HTMLInputElement).name || null;
+        let selector = '';
+
+        if (customType === 'combobox') {
+          const role = el.getAttribute('role');
+          if (role === 'combobox') {
+            selector = id ? `div[role="combobox"]#${id}` : `div[role="combobox"]:nth-of-type(${globalIndex + 1})`;
+          } else {
+            selector = id ? `button[aria-haspopup="listbox"]#${id}` : `button[aria-haspopup="listbox"]:nth-of-type(${globalIndex + 1})`;
+          }
+        } else if (customType === 'radiogroup') {
+          selector = id ? `div[role="radiogroup"]#${id}` : `div[role="radiogroup"]:nth-of-type(${globalIndex + 1})`;
+        } else if (customType === 'checkbox') {
+          selector = id ? `div[role="checkbox"]#${id}` : `div[role="checkbox"]:nth-of-type(${globalIndex + 1})`;
+        } else if (id) {
+          selector = `#${id}`;
+        } else if (name) {
+          selector = `[name="${name}"]`;
+        } else {
+          selector = '';
+        }
+
+        if (!selector) {
+          globalIndex++;
+          continue;
+        }
+
+        // Label extraction — look for <label>, aria-label, or sibling/parent text
+        let labelText = '';
+
+        if (id) {
+          const lbl = document.querySelector(`label[for="${id}"]`);
+          if (lbl) labelText = lbl.textContent?.trim() ?? '';
+        }
+        if (!labelText) {
+          labelText = el.getAttribute('aria-label')?.trim() ?? '';
+        }
+        if (!labelText) {
+          labelText = el.getAttribute('aria-labelledby')
+            ? (document.getElementById(el.getAttribute('aria-labelledby')!)?.textContent?.trim() ?? '')
+            : '';
+        }
+        if (!labelText) {
+          // Walk up the tree looking for a label or a sibling div with text
+          let node: Element | null = el.parentElement;
+          while (node) {
+            if (node.tagName === 'LABEL') {
+              labelText = node.textContent?.trim() ?? '';
+              break;
+            }
+            const labels = node.querySelectorAll('label');
+            if (labels.length === 1) {
+              labelText = labels[0].textContent?.trim() ?? '';
+              break;
+            }
+            // Look for a sibling div or span that acts as a label
+            const siblings = Array.from(node.children);
+            for (const sibling of siblings) {
+              if (sibling === el) continue;
+              const sibTag = sibling.tagName.toLowerCase();
+              if (['div', 'span', 'p', 'legend'].includes(sibTag)) {
+                const text = sibling.textContent?.trim();
+                if (text && text.length < 150) {
+                  labelText = text;
+                  break;
+                }
+              }
+            }
+            if (labelText) break;
+            if (['FIELDSET', 'LI', 'DD', 'SECTION', 'FORM'].includes(node.tagName)) break;
+            node = node.parentElement;
+          }
+        }
+
+        if (!labelText) {
+          globalIndex++;
+          continue; // skip unlabelled fields
+        }
+
+        // Options for custom dropdowns — try to read from aria attributes or DOM
+        let options: string[] = [];
+        if (customType === 'combobox') {
+          // Options are in a listbox that may not be in DOM yet; leave empty for now
+          options = [];
+        }
+
+        results.push({
+          label: labelText,
+          type: fieldType,
+          selector,
+          options,
+          required: (el as HTMLInputElement).required ?? el.getAttribute('aria-required') === 'true',
+          id,
+          name,
+          index: globalIndex,
+        });
+
+        globalIndex++;
+      }
+
+      return results;
+    });
+
+    // Deduplicate by label+type (keep first occurrence)
+    const seen = new Set<string>();
+    const uniqueFields: FieldInfo[] = [];
+    for (const f of fieldInfos) {
+      const key = `${f.label}::${f.type}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueFields.push(f);
+      }
+    }
+
+    // Build FormField array for the engine
+    const formFields: FormField[] = uniqueFields.map(f => ({
+      label: f.label,
+      type: f.type,
+      options: f.options.length > 0 ? f.options : undefined,
+      required: f.required,
+    }));
+
+    // Resolve all fields via the engine (profile → cache → AI)
+    const resolved = await engine.resolveFields(formFields, job.description_snippet);
+
+    // ── Apply resolved values to the page ─────────────────────────────────────
+    for (const result of resolved) {
+      if (result.source === 'unfilled' || !result.value) continue;
+
+      const info = uniqueFields.find(f => f.label === result.label);
+      if (!info) continue;
+
+      try {
+        switch (info.type) {
+          case 'text':
+          case 'textarea': {
+            await page.locator(info.selector).fill(result.value);
+            break;
+          }
+
+          case 'select': {
+            // Custom Ashby dropdown: click to open → wait for listbox → click matching option
+            try {
+              await page.locator(info.selector).click();
+              await page.waitForSelector('[role="listbox"]', { timeout: 3000 });
+
+              // Find matching option in the listbox
+              const option = page
+                .locator('div[role="option"], li[role="option"]')
+                .filter({ hasText: result.value })
+                .first();
+
+              if (await option.count() > 0) {
+                await option.click();
+              } else {
+                // Try case-insensitive partial match
+                const allOptions = page.locator('div[role="option"], li[role="option"]');
+                const optCount = await allOptions.count();
+                let matched = false;
+                for (let oi = 0; oi < optCount; oi++) {
+                  const opt = allOptions.nth(oi);
+                  const text = (await opt.textContent()) ?? '';
+                  if (text.toLowerCase().includes(result.value.toLowerCase())) {
+                    await opt.click();
+                    matched = true;
+                    break;
+                  }
+                }
+                if (!matched) {
+                  // Close the dropdown by pressing Escape
+                  await page.keyboard.press('Escape');
+                  console.warn(`[ashby] Could not find option "${result.value}" for field "${result.label}"`);
+                }
+              }
+            } catch (err) {
+              console.warn(`[ashby] Dropdown interaction failed for "${result.label}":`, err);
+            }
+            break;
+          }
+
+          case 'radio': {
+            // Ashby radio groups use div[role="radiogroup"] with div[role="radio"] children
+            await page
+              .locator(info.selector)
+              .locator('div[role="radio"]')
+              .filter({ hasText: result.value })
+              .first()
+              .click();
+            break;
+          }
+
+          case 'checkbox': {
+            const truthy = /^(yes|true|1)$/i.test(result.value.trim());
+            if (truthy) {
+              const checkbox = page.locator(info.selector).first();
+              const isChecked = (await checkbox.getAttribute('aria-checked')) === 'true';
+              if (!isChecked) await checkbox.click();
+            }
+            break;
+          }
+
+          default:
+            break;
+        }
+      } catch (err) {
+        console.warn(`[ashby] Failed to fill field "${result.label}":`, err);
+      }
+    }
+
+    return resolved;
+  },
+
+  // ── Multi-step handling ──────────────────────────────────────────────────────
+
+  async handleMultiStep(page: Page): Promise<boolean> {
+    try {
+      const nextButton = page
+        .locator('button')
+        .filter({ hasText: /next|continue/i })
+        .first();
+
+      if (await nextButton.count() === 0) return false;
+
+      await nextButton.click();
+
+      await page.waitForTimeout(300);
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => null);
+
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // ── Resume upload ────────────────────────────────────────────────────────────
+
+  async uploadResume(page: Page, filePath: string): Promise<void> {
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count();
+    if (count > 0) {
+      await fileInputs.first().setInputFiles(filePath);
+    } else {
+      console.warn('[ashby] No file input found for resume upload');
+    }
+  },
+
+  // ── Submit button ────────────────────────────────────────────────────────────
+
+  async getSubmitButton(page: Page): Promise<ElementHandle | null> {
+    const candidates = [
+      'button[type="submit"]',
+      'button:text-matches("Submit Application", "i")',
+      'button:text-matches("Submit", "i")',
+      'button:text-matches("Apply", "i")',
+    ];
+
+    for (const sel of candidates) {
+      try {
+        const el = await page.$(sel);
+        if (el) return el;
+      } catch {
+        // try next candidate
+      }
+    }
+    return null;
+  },
+};

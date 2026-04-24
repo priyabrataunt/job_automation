@@ -1,6 +1,8 @@
 import type { Page } from 'playwright';
 import type { PlatformAdapter } from '../types';
 import { greenhouse } from './greenhouse';
+import { lever } from './lever';
+import { ashby } from './ashby';
 import { generic } from './generic';
 
 // ── Adapter registry ───────────────────────────────────────────────────────────
@@ -8,8 +10,8 @@ import { generic } from './generic';
 // generic is intentionally excluded from this list — it is always the fallback.
 export const ADAPTERS: PlatformAdapter[] = [
   greenhouse,
-  // lever,   — Task 2
-  // ashby,   — Task 2
+  lever,
+  ashby,
 ];
 
 /**
@@ -29,4 +31,4 @@ export async function detectAdapter(page: Page): Promise<PlatformAdapter> {
   return generic;
 }
 
-export { greenhouse, generic };
+export { greenhouse, lever, ashby, generic };
