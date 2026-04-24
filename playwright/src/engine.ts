@@ -21,7 +21,8 @@ import * as fs from 'fs';
 
 import { launchSession, getPage } from './session';
 import { FormEngine } from './form-engine';
-import type { EngineConfig, JobResult, QueuedJob, UserProfile } from './types';
+import { detectAdapter } from './adapters/index';
+import type { EngineConfig, FillResult, JobResult, QueuedJob, UserProfile } from './types';
 import * as ui from './terminal-ui';
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -72,6 +73,18 @@ async function markApplied(apiBase: string, jobId: number): Promise<void> {
 
 async function removeFromQueue(apiBase: string, jobId: number): Promise<void> {
   await fetch(`${apiBase}/api/jobs/${jobId}/queue`, { method: 'DELETE' });
+}
+
+async function saveSession(apiBase: string, jobId: number, adapterName: string, fillResults: FillResult[]): Promise<void> {
+  try {
+    await fetch(`${apiBase}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, adapterName, fillResults, appliedAt: new Date().toISOString() }),
+    });
+  } catch {
+    // Optional — silently ignore if endpoint doesn't exist or errors
+  }
 }
 
 // ── Main runner ───────────────────────────────────────────────────────────────
@@ -132,6 +145,40 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
         continue;
       }
 
+      // Detect platform adapter and fill the form
+      let fillResults: FillResult[] = [];
+      let adapterName = 'unknown';
+      try {
+        const adapter = await detectAdapter(page);
+        adapterName = adapter.name;
+
+        // Fill current page/step
+        fillResults = await adapter.fillForm(page, formEngine, job);
+
+        // Handle multi-step forms (up to 5 steps)
+        const MAX_STEPS = 5;
+        for (let step = 1; step < MAX_STEPS; step++) {
+          const advanced = await adapter.handleMultiStep(page);
+          if (!advanced) break;
+          const stepResults = await adapter.fillForm(page, formEngine, job);
+          fillResults = fillResults.concat(stepResults);
+        }
+
+        // Upload resume if profile has one
+        if (profile.resume_path) {
+          try {
+            await adapter.uploadResume(page, profile.resume_path);
+          } catch (resumeErr: any) {
+            console.warn(`[Engine] Resume upload warning: ${resumeErr.message ?? resumeErr}`);
+          }
+        }
+      } catch (adapterErr: any) {
+        console.warn(`[Engine] Adapter error: ${adapterErr.message ?? adapterErr} — continuing in manual mode`);
+      }
+
+      // Print field summary (always, even if empty after an error)
+      ui.printFieldSummary(fillResults, adapterName);
+
       // Show controls and wait for first keypress
       ui.printControls();
       const action = await ui.waitForUserAction();
@@ -171,8 +218,10 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
 
       // Mark as applied
       await markApplied(config.apiBase, job.id);
+      // Optionally save application session (non-blocking, errors ignored)
+      await saveSession(config.apiBase, job.id, adapterName, fillResults);
       ui.printSuccess(job);
-      results.push({ jobId: job.id, title: job.title, company: job.company, status: 'applied' });
+      results.push({ jobId: job.id, title: job.title, company: job.company, status: 'applied', fillResults, adapterUsed: adapterName });
     }
   } finally {
     ui.printBatchSummary(results);

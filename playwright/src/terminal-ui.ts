@@ -47,6 +47,26 @@ export function printFillResults(results: FillResult[]): void {
   }
 }
 
+export function printFieldSummary(results: FillResult[], adapterName: string): void {
+  console.log(`\n  [Adapter: ${adapterName}]`);
+  if (results.length === 0) {
+    console.log('  (no fields detected)');
+    return;
+  }
+  for (const r of results) {
+    const icon  = SOURCE_ICON[r.source]  ?? '?';
+    const label = SOURCE_LABEL[r.source] ?? r.source;
+    if (r.source === 'unfilled') {
+      console.log(`  ${icon} ${r.label} → unfilled (manual fill needed)`);
+    } else {
+      const val = r.value
+        ? `"${r.value.slice(0, 60)}${r.value.length > 60 ? '…' : ''}"`
+        : '(empty)';
+      console.log(`  ${icon} ${r.label} → ${val} (${label})`);
+    }
+  }
+}
+
 export function printControls(): void {
   console.log('\n  Press Enter to focus browser | s to skip | q to quit...');
 }
