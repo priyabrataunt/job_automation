@@ -34,18 +34,6 @@ export function printJobHeader(job: QueuedJob, current: number, total: number): 
   console.log(DIVIDER);
 }
 
-export function printFillResults(results: FillResult[]): void {
-  if (results.length === 0) return;
-  console.log('  Fields filled:');
-  for (const r of results) {
-    const icon  = SOURCE_ICON[r.source]  ?? '?';
-    const label = SOURCE_LABEL[r.source] ?? r.source;
-    const val   = r.value
-      ? `"${r.value.slice(0, 50)}${r.value.length > 50 ? '…' : ''}"`
-      : '(empty)';
-    console.log(`    ${icon} "${r.label}" → ${val}  [${label}]`);
-  }
-}
 
 export function printFieldSummary(results: FillResult[], adapterName: string): void {
   console.log(`\n  [Adapter: ${adapterName}]`);
@@ -79,7 +67,10 @@ export function printSubmitControls(): void {
 /** Waits for a single keypress and returns the action. */
 export async function waitForUserAction(): Promise<UserAction> {
   if (!process.stdin.isTTY) {
-    // Non-interactive mode — auto-proceed after a short delay
+    // Non-interactive (piped/CI) mode: auto-proceed after a short delay.
+    // Note: this will reach markApplied without human confirmation.
+    // The engine never auto-clicks Submit, but jobs will be marked 'applied' automatically.
+    // To disable this behavior in CI, set env REQUIRE_TTY=true and exit early before calling run().
     await new Promise(r => setTimeout(r, 2000));
     return 'proceed';
   }
