@@ -1,5 +1,9 @@
 import type { Page } from 'playwright';
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Handles custom dropdown interactions (non-native <select> elements).
  *
@@ -45,7 +49,7 @@ export async function selectCustomDropdown(
     const optionSelectors = ['[role="option"]', '[role="menuitem"]', 'li'];
 
     for (const optSel of optionSelectors) {
-      const option = listboxLocator.locator(optSel).filter({ hasText: new RegExp(value, 'i') }).first();
+      const option = listboxLocator.locator(optSel).filter({ hasText: new RegExp(escapeRegex(value), 'i') }).first();
       const count = await option.count();
       if (count > 0) {
         await option.click();
@@ -102,7 +106,7 @@ export async function fillAutocomplete(
     // 3. Find a suggestion containing the value text
     const suggestion = page
       .locator(suggestionSelector)
-      .filter({ hasText: new RegExp(value, 'i') })
+      .filter({ hasText: new RegExp(escapeRegex(value), 'i') })
       .first();
 
     const count = await suggestion.count();

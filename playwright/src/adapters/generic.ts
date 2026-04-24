@@ -291,12 +291,12 @@ export const generic: PlatformAdapter = {
         .filter({ hasText: /next|continue|proceed/i })
         .first();
 
-      // Exclude submit buttons
-      const tag = await nextButton.evaluate((el: HTMLButtonElement) => el.type?.toLowerCase());
-      if (tag === 'submit') return false;
-
       const count = await nextButton.count();
       if (count === 0) return false;
+
+      // Only run evaluate() if we know a button exists
+      const tag = await nextButton.evaluate((el) => (el as HTMLButtonElement).type?.toLowerCase());
+      if (tag === 'submit') return false;
 
       await nextButton.click();
       await page.waitForTimeout(300);
