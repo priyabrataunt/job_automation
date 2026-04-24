@@ -388,8 +388,12 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_jobs_ats_source ON jobs(ats_source);
     CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score);
     CREATE INDEX IF NOT EXISTS idx_jobs_queue_position ON jobs(queue_position);
-    CREATE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
   `);
+
+  // Migration: upgrade non-unique index to unique (for existing databases)
+  await db.exec(`DROP INDEX IF EXISTS idx_answer_cache_hash`);
+  await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash)`);
 
   await db.prepare('INSERT INTO user_preferences (id) VALUES (1) ON CONFLICT (id) DO NOTHING').run();
 

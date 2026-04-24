@@ -8,6 +8,7 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { createHash } from 'crypto';
 // Load writing-style reference so AI outputs sound like the user
 let writingStylePrompt = '';
 try {
@@ -1052,5 +1053,108 @@ Guidelines:
              WHERE question_hash = ?`
         ).run(hash).catch(() => {});
         return reply.send({ answer: row.answer, confidence: row.confidence });
+    });
+
+    // GET /api/cache — list all cached answers
+    app.get('/api/cache', async (request, reply) => {
+        const { limit = '50', offset = '0', search } = request.query as {
+            limit?: string;
+            offset?: string;
+            search?: string;
+        };
+        const lim = Math.min(parseInt(limit) || 50, 500);
+        const off = parseInt(offset) || 0;
+        const conditions: string[] = [];
+        const params: any[] = [];
+        if (search) {
+            conditions.push('question_text ILIKE ?');
+            params.push(`%${search}%`);
+        }
+        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        const totalRow = await db.prepare(
+            `SELECT COUNT(*) AS count FROM answer_cache ${where}`
+        ).get<{ count: number }>(...params);
+        const total = Number(totalRow?.count ?? 0);
+        const entries = await db.prepare(
+            `SELECT id, question_text, answer, source, confidence, times_used, last_used_at, created_at
+             FROM answer_cache ${where}
+             ORDER BY created_at DESC
+             LIMIT ? OFFSET ?`
+        ).all(...params, lim, off);
+        return reply.send({ entries, total });
+    });
+
+    // POST /api/cache — create or update a cached answer
+    app.post('/api/cache', async (request, reply) => {
+        const { question_text, answer, source, confidence } = request.body as {
+            question_text: string;
+            answer: string;
+            source: string;
+            confidence?: number;
+        };
+        if (!question_text || !answer || !source) {
+            return reply.code(400).send({ error: 'question_text, answer, and source are required' });
+        }
+        const hash = createHash('sha256').update(question_text.trim().toLowerCase()).digest('hex');
+        const conf = confidence !== undefined ? confidence : (source === 'manual_correction' ? 1.0 : source === 'manual_first_fill' ? 0.9 : 0.5);
+        const result = await db.prepare(
+            `INSERT INTO answer_cache (question_text, question_hash, answer, source, confidence)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (question_hash) DO UPDATE SET
+               answer = CASE
+                 WHEN EXCLUDED.source = 'manual_correction' OR EXCLUDED.confidence >= answer_cache.confidence
+                 THEN EXCLUDED.answer
+                 ELSE answer_cache.answer
+               END,
+               source = CASE
+                 WHEN EXCLUDED.source = 'manual_correction' OR EXCLUDED.confidence >= answer_cache.confidence
+                 THEN EXCLUDED.source
+                 ELSE answer_cache.source
+               END,
+               confidence = CASE
+                 WHEN EXCLUDED.confidence >= answer_cache.confidence
+                 THEN EXCLUDED.confidence
+                 ELSE answer_cache.confidence
+               END,
+               last_used_at = NOW()
+             RETURNING id`
+        ).run(question_text.trim(), hash, answer, source, conf);
+        return reply.send({ ok: true, id: result.lastInsertRowid });
+    });
+
+    // PATCH /api/cache/:id — update a specific cache entry
+    app.patch('/api/cache/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const numId = parseInt(id);
+        if (isNaN(numId)) return reply.code(400).send({ error: 'Invalid id' });
+        const { answer, source, confidence } = request.body as {
+            answer?: string;
+            source?: string;
+            confidence?: number;
+        };
+        const sets: string[] = [];
+        const params: any[] = [];
+        if (answer !== undefined) { sets.push('answer = ?'); params.push(answer); }
+        if (source !== undefined) { sets.push('source = ?'); params.push(source); }
+        if (confidence !== undefined) { sets.push('confidence = ?'); params.push(confidence); }
+        if (sets.length === 0) {
+            return reply.code(400).send({ error: 'No fields to update' });
+        }
+        sets.push('last_used_at = NOW()');
+        params.push(numId);
+        const result = await db.prepare(
+            `UPDATE answer_cache SET ${sets.join(', ')} WHERE id = ?`
+        ).run(...params);
+        if (result.changes === 0) return reply.code(404).send({ error: 'not found' });
+        return reply.send({ ok: true });
+    });
+
+    // DELETE /api/cache/:id — delete a cache entry
+    app.delete('/api/cache/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const numId = parseInt(id);
+        if (isNaN(numId)) return reply.code(400).send({ error: 'Invalid id' });
+        await db.prepare('DELETE FROM answer_cache WHERE id = ?').run(numId);
+        return reply.send({ ok: true });
     });
 }

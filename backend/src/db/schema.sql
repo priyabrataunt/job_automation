@@ -102,4 +102,4 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_ats_source ON jobs(ats_source);
 CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score);
 CREATE INDEX IF NOT EXISTS idx_jobs_queue_position ON jobs(queue_position);
-CREATE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);

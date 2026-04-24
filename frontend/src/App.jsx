@@ -273,7 +273,7 @@ function ScoreTooltip({ details, score, children }) {
   )
 }
 
-function JobCard({ job, onStatusChange, onOptimize }) {
+function JobCard({ job, onStatusChange, onOptimize, onQueue }) {
   let fullDescription = job.description || job.description_snippet || ''
   if (job.raw_json) {
     try {
@@ -405,7 +405,214 @@ function JobCard({ job, onStatusChange, onOptimize }) {
             textDecoration: 'none',
           }}
         >Apply →</a>
+        {onQueue && (
+          <button
+            onClick={() => job.status !== 'queued' && onQueue(job.id)}
+            style={{
+              background: job.status === 'queued' ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+              color: job.status === 'queued' ? 'var(--fg-green)' : 'var(--text-muted)',
+              border: 'none',
+              borderRadius: 6,
+              padding: '4px 14px',
+              fontSize: 12,
+              fontWeight: job.status === 'queued' ? 700 : 400,
+              cursor: job.status === 'queued' ? 'default' : 'pointer',
+            }}
+          >{job.status === 'queued' ? '✓ Queued' : '🚀 Queue'}</button>
+        )}
       </div>
+    </div>
+  )
+}
+
+// ── Cache Viewer ────────────────────────────────────────────────────────────
+const SOURCE_BADGE_STYLES = {
+  ai:                 { background: '#df8e1d', color: '#fff' },
+  manual_correction:  { background: '#40a02b', color: '#fff' },
+  manual_first_fill:  { background: '#1e66f5', color: '#fff' },
+}
+
+function CacheSourceBadge({ source }) {
+  const style = SOURCE_BADGE_STYLES[source] || { background: '#45475a', color: '#fff' }
+  return (
+    <span style={{
+      ...style,
+      fontSize: 10, fontWeight: 600, borderRadius: 4,
+      padding: '2px 6px', whiteSpace: 'nowrap',
+    }}>{source}</span>
+  )
+}
+
+function CacheViewer() {
+  const [entries, setEntries] = useState([])
+  const [total, setTotal] = useState(0)
+  const [search, setSearch] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editValue, setEditValue] = useState('')
+  const [loading, setLoading] = useState(false)
+  const searchTimerRef = useRef(null)
+
+  const fetchEntries = useCallback(async (q = '') => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ limit: '50' })
+      if (q) params.set('search', q)
+      const res = await fetch(`${API}/api/cache?${params}`)
+      const data = await res.json()
+      setEntries(data.entries || [])
+      setTotal(data.total || 0)
+    } catch {
+      // ignore fetch errors
+    }
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetchEntries() }, [fetchEntries])
+
+  const handleSearch = useCallback((e) => {
+    const q = e.target.value
+    setSearch(q)
+    clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => fetchEntries(q), 350)
+  }, [fetchEntries])
+
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Delete this cached answer?')) return
+    await fetch(`${API}/api/cache/${id}`, { method: 'DELETE' })
+    fetchEntries(search)
+  }, [search, fetchEntries])
+
+  const startEdit = useCallback((entry) => {
+    setEditingId(entry.id)
+    setEditValue(entry.answer)
+  }, [])
+
+  const saveEdit = useCallback(async (id) => {
+    if (editValue.trim()) {
+      await fetch(`${API}/api/cache/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: editValue.trim() }),
+      })
+    }
+    setEditingId(null)
+    fetchEntries(search)
+  }, [editValue, search, fetchEntries])
+
+  const trunc = (str, n) => str && str.length > n ? str.slice(0, n) + '…' : (str || '')
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <h3 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 16 }}>🧠 Answer Cache</h3>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {loading ? 'Loading…' : `${total} entries`}
+        </span>
+      </div>
+
+      <input
+        value={search}
+        onChange={handleSearch}
+        placeholder="Search questions…"
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: 'var(--bg-surface-alt)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 6, padding: '7px 12px',
+          color: 'var(--text-primary)', fontSize: 13, marginBottom: 12,
+        }}
+      />
+
+      {entries.length === 0 && !loading && (
+        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '20px 0', textAlign: 'center' }}>
+          No cached answers yet. They appear after the form engine fills applications.
+        </div>
+      )}
+
+      {entries.length > 0 && (
+        <div style={{
+          border: '1px solid var(--border)',
+          borderRadius: 8, overflow: 'hidden',
+          background: 'var(--bg-surface)',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 2fr 130px 70px 70px 80px',
+            gap: 8, padding: '8px 12px',
+            background: 'var(--bg-surface-alt)',
+            borderBottom: '1px solid var(--border)',
+            fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase',
+          }}>
+            <span>Question</span>
+            <span>Answer</span>
+            <span>Source</span>
+            <span style={{ textAlign: 'right' }}>Confidence</span>
+            <span style={{ textAlign: 'right' }}>Used</span>
+            <span></span>
+          </div>
+
+          {entries.map((entry, i) => (
+            <div key={entry.id} style={{
+              display: 'grid',
+              gridTemplateColumns: '2fr 2fr 130px 70px 70px 80px',
+              gap: 8, padding: '8px 12px',
+              borderBottom: i < entries.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+              alignItems: 'center',
+              fontSize: 12,
+            }}>
+              <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }} title={entry.question_text}>
+                {trunc(entry.question_text, 80)}
+              </span>
+              <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
+                {editingId === entry.id ? (
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onBlur={() => saveEdit(entry.id)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(entry.id); if (e.key === 'Escape') setEditingId(null) }}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      background: 'var(--bg-surface-alt)',
+                      border: '1px solid #1e66f5',
+                      borderRadius: 4, padding: '3px 6px',
+                      color: 'var(--text-primary)', fontSize: 12,
+                    }}
+                  />
+                ) : (
+                  <span
+                    onClick={() => startEdit(entry)}
+                    title={`Click to edit: ${entry.answer}`}
+                    style={{ cursor: 'text', borderBottom: '1px dashed var(--border-subtle)' }}
+                  >
+                    {trunc(entry.answer, 60)}
+                  </span>
+                )}
+              </span>
+              <span><CacheSourceBadge source={entry.source} /></span>
+              <span style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                {entry.confidence !== null ? `${Math.round(entry.confidence * 100)}%` : '—'}
+              </span>
+              <span style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
+                {entry.times_used ?? 0}×
+              </span>
+              <span style={{ textAlign: 'right' }}>
+                <button
+                  onClick={() => handleDelete(entry.id)}
+                  style={{
+                    background: 'transparent', border: '1px solid var(--border-subtle)',
+                    borderRadius: 4, padding: '2px 8px',
+                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11,
+                  }}
+                  onMouseEnter={e => { e.target.style.borderColor = '#e64553'; e.target.style.color = '#e64553' }}
+                  onMouseLeave={e => { e.target.style.borderColor = 'var(--border-subtle)'; e.target.style.color = 'var(--text-muted)' }}
+                >Delete</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -592,12 +799,219 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)))
 }
 
+// ── Queue View ─────────────────────────────────────────────────────────────
+function QueueView() {
+  const [queueJobs, setQueueJobs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [draggedId, setDraggedId] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API}/api/jobs/queue`)
+      const data = await res.json()
+      setQueueJobs(data.jobs || [])
+    } catch {
+      setError('Failed to load queue.')
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function handleRemove(jobId) {
+    const prev = queueJobs
+    setQueueJobs(p => p.filter(j => j.id !== jobId))
+    try {
+      const res = await fetch(`${API}/api/jobs/${jobId}/queue`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('remove failed')
+    } catch {
+      setQueueJobs(prev) // rollback
+    }
+  }
+
+  function handleDragStart(e, jobId) {
+    setDraggedId(jobId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  async function handleDrop(e, targetId) {
+    e.preventDefault()
+    if (draggedId === null || draggedId === targetId) return
+    const fromIdx = queueJobs.findIndex(j => j.id === draggedId)
+    const toIdx = queueJobs.findIndex(j => j.id === targetId)
+    if (fromIdx === -1 || toIdx === -1) return
+    // Optimistic reorder
+    const reordered = [...queueJobs]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    setQueueJobs(reordered)
+    setDraggedId(null)
+    // Persist new position (1-based)
+    try {
+      const res = await fetch(`${API}/api/jobs/${draggedId}/queue-position`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: toIdx + 1 }),
+      })
+      if (!res.ok) throw new Error('reorder failed')
+    } catch {
+      // Rollback to real server state on failure
+      load()
+    }
+  }
+
+  async function handleQueueAllSaved() {
+    try {
+      const res = await fetch(`${API}/api/jobs?status=saved&limit=200`)
+      const data = await res.json()
+      const ids = (data.jobs || []).map(j => j.id)
+      if (ids.length === 0) { alert('No saved jobs to queue.'); return }
+      await fetch(`${API}/api/jobs/bulk-queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      load()
+    } catch {
+      alert('Failed to queue saved jobs.')
+    }
+  }
+
+  async function handleClearQueue() {
+    if (!window.confirm('Remove all jobs from the queue?')) return
+    try {
+      await Promise.all(queueJobs.map(j => fetch(`${API}/api/jobs/${j.id}/queue`, { method: 'DELETE' })))
+      setQueueJobs([])
+    } catch {
+      alert('Failed to clear queue.')
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Application Queue</h2>
+        {queueJobs.length > 0 && (
+          <span style={{ background: 'var(--bg-yellow)', color: 'var(--fg-yellow)', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 99 }}>
+            {queueJobs.length} queued
+          </span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleQueueAllSaved}
+            style={{
+              background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+          >+ Queue All Saved</button>
+          {queueJobs.length > 0 && (
+            <button
+              onClick={handleClearQueue}
+              style={{
+                background: 'var(--bg-red)', color: 'var(--fg-red)', border: '1px solid var(--fg-red)',
+                borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >Clear Queue</button>
+          )}
+        </div>
+      </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
+        Drag to reorder. Jobs in your queue are ready to apply to — remove them when done.
+      </p>
+      {loading ? (
+        <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center' }}>Loading queue...</div>
+      ) : error ? (
+        <div style={{ color: 'var(--fg-red)', padding: 40, textAlign: 'center' }}>{error}</div>
+      ) : queueJobs.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: 60, fontSize: 15 }}>
+          Queue is empty. Save jobs and click "+ Queue All Saved", or use the 🚀 Queue button on any job card.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {queueJobs.map((job, idx) => (
+            <div
+              key={job.id}
+              draggable
+              onDragStart={e => handleDragStart(e, job.id)}
+              onDragEnd={() => setDraggedId(null)}
+              onDragOver={handleDragOver}
+              onDrop={e => handleDrop(e, job.id)}
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderLeft: '4px solid #fe640b',
+                borderRadius: 8,
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                opacity: draggedId === job.id ? 0.5 : 1,
+                cursor: 'default',
+              }}
+            >
+              {/* Drag handle */}
+              <span style={{ fontSize: 18, color: 'var(--text-muted)', cursor: 'grab', userSelect: 'none', lineHeight: 1 }}>≡</span>
+              {/* Position */}
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', minWidth: 24 }}>{idx + 1}</span>
+              {/* Job info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <a
+                    href={job.apply_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'var(--text-link)', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}
+                  >{job.title}</a>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{job.company}</span>
+                  {job.ats_source && <SourceBadge source={job.ats_source} />}
+                </div>
+              </div>
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                {job.apply_url && (
+                  <a
+                    href={job.apply_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      background: '#1e66f5', color: '#fff',
+                      borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >Apply →</a>
+                )}
+                <button
+                  onClick={() => handleRemove(job.id)}
+                  style={{
+                    background: 'var(--bg-surface-alt)', color: 'var(--fg-red)',
+                    border: '1px solid var(--fg-red)', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 12, cursor: 'pointer',
+                  }}
+                >Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tab Components ─────────────────────────────────────────────────────────
-function TabBar({ tab, setTab, followUpCount }) {
+function TabBar({ tab, setTab, followUpCount, queueCount }) {
   const tabs = [
     { id: 'digest', label: '📬 Digest' },
     { id: 'all', label: '📋 All Jobs' },
     { id: 'saved', label: '💜 Saved' },
+    { id: 'queue', label: queueCount > 0 ? `🚀 Queue (${queueCount})` : '🚀 Queue' },
     { id: 'applied', label: '✅ Applied' },
     { id: 'followup', label: followUpCount > 0 ? `⏰ Follow-up (${followUpCount})` : '⏰ Follow-up' },
     { id: 'analytics', label: '📊 Analytics' },
@@ -882,7 +1296,7 @@ function HistoryView({ onStatusChange, onOptimize }) {
 }
 
 // ── Digest View ────────────────────────────────────────────────────────────
-function DigestView({ onStatusChange, onOptimize }) {
+function DigestView({ onStatusChange, onOptimize, onQueue }) {
   const [jobs, setJobs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -925,7 +1339,7 @@ function DigestView({ onStatusChange, onOptimize }) {
             No jobs in the last 24h. Run a collection first!
           </div>
         ) : jobs.map(job => (
-          <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} />
+          <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onQueue={onQueue} />
         ))}
       </div>
     </div>
@@ -1358,6 +1772,7 @@ export default function App() {
   const [scoring, setScoring] = useState(false)
   const [scoreMsg, setScoreMsg] = useState('')
   const [followUpCount, setFollowUpCount] = useState(0)
+  const [queueCount, setQueueCount] = useState(0)
   const [showAddJob, setShowAddJob] = useState(false)
   const [dark, setDark] = useState(() => localStorage.getItem('theme') !== 'light')
 
@@ -1412,6 +1827,14 @@ export default function App() {
     } catch { /* ignore */ }
   }, [])
 
+  const fetchQueueCount = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/jobs/queue`)
+      const data = await res.json()
+      setQueueCount((data.jobs || []).length)
+    } catch { /* ignore */ }
+  }, [])
+
   const fetchResume = useCallback(async () => {
     const res = await fetch(`${API}/api/resume`)
     const data = await res.json()
@@ -1422,10 +1845,11 @@ export default function App() {
     fetchPrefs()
     fetchResume()
     fetchFollowUpCount()
-  }, [fetchPrefs, fetchResume, fetchFollowUpCount])
+    fetchQueueCount()
+  }, [fetchPrefs, fetchResume, fetchFollowUpCount, fetchQueueCount])
 
   useEffect(() => {
-    if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history') return
+    if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue') return
     const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
     const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', entry_only: '' } : filters
     fetchJobs(activeFilters, offset, statusOverride)
@@ -1448,12 +1872,13 @@ export default function App() {
         fetchJobs(filters, offset, statusOverride)
         fetchStats()
         fetchFollowUpCount()
+        fetchQueueCount()
         // Auto visa-scan new jobs after collection
         fetch(`${API}/api/visa-scan`, { method: 'POST' }).catch(() => {})
       }
     }, 3000)
     return () => clearInterval(iv)
-  }, [collecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount])
+  }, [collecting, tab, filters, offset, fetchJobs, fetchStats, fetchFollowUpCount, fetchQueueCount])
 
   async function handleCollect() {
     setCollecting(true)
@@ -1513,6 +1938,21 @@ export default function App() {
     })
     setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: newStatus } : j))
     fetchStats()
+    fetchQueueCount()
+  }
+
+  async function handleQueueAdd(jobId) {
+    // Optimistic update
+    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'queued' } : j))
+    try {
+      const res = await fetch(`${API}/api/jobs/${jobId}/queue`, { method: 'POST' })
+      if (!res.ok) throw new Error('queue add failed')
+      fetchQueueCount()
+    } catch {
+      // Rollback - restore previous status (we don't know exact prev status, so refetch)
+      fetchJobs()
+      fetchQueueCount()
+    }
   }
 
   function setFilter(key, value) {
@@ -1606,13 +2046,18 @@ export default function App() {
       </div>
 
       {/* Tabs */}
-      <TabBar tab={tab} setTab={(t) => { setTab(t); setOffset(0) }} followUpCount={followUpCount} />
+      <TabBar tab={tab} setTab={(t) => { setTab(t); setOffset(0) }} followUpCount={followUpCount} queueCount={queueCount} />
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px' }}>
 
         {/* Digest Tab */}
         {tab === 'digest' && (
-          <DigestView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} />
+          <DigestView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} />
+        )}
+
+        {/* Queue Tab */}
+        {tab === 'queue' && (
+          <QueueView />
         )}
 
         {/* Follow-up Tab */}
@@ -1635,6 +2080,7 @@ export default function App() {
           <div>
             <h2 style={{ color: 'var(--text-primary)', margin: '0 0 16px', fontSize: 18 }}>Settings</h2>
             <PreferencesPanel prefs={prefs} onSave={(updated) => setPrefs(updated)} />
+            <CacheViewer />
           </div>
         )}
 
@@ -1797,7 +2243,7 @@ export default function App() {
                    'No jobs found. Click "Collect Now" to start fetching jobs.'}
                 </div>
               ) : jobs.map(job => (
-                <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} />
+                <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} />
               ))}
             </div>
           </>
