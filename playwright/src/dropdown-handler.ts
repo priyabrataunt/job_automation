@@ -1,7 +1,33 @@
 import type { Page } from 'playwright';
 
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isNearMatch(target: string, candidate: string): boolean {
+  const t = normalizeText(target);
+  const c = normalizeText(candidate);
+  if (!t || !c) return false;
+  return c === t || c.includes(t) || t.includes(c);
+}
+
+async function findMatchingOption(
+  page: Page,
+  optionSelectors: string[],
+  value: string,
+): Promise<import('playwright').Locator | null> {
+  for (const selector of optionSelectors) {
+    const options = page.locator(selector);
+    const count = await options.count();
+    for (let index = 0; index < count; index++) {
+      const option = options.nth(index);
+      const text = normalizeText(await option.textContent());
+      if (isNearMatch(value, text)) {
+        return option;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -18,61 +44,96 @@ export async function selectCustomDropdown(
   value: string,
 ): Promise<boolean> {
   try {
-    // 1. Open the dropdown
-    await page.locator(triggerSelector).click();
+    const trigger = page.locator(triggerSelector).first();
+    await trigger.waitFor({ state: 'visible', timeout: 3000 });
+    await trigger.click();
 
-    // 2. Wait for a listbox / menu to appear (try selectors in order)
     const listboxSelectors = [
       '[role="listbox"]',
       '[role="menu"]',
-      'ul[role="listbox"]',
-      '.dropdown-menu:visible',
+      '[id*="listbox"]',
+      '.MuiAutocomplete-popper',
+      '.MuiMenu-paper',
+      '.ant-select-dropdown',
+      '.react-select__menu',
+      '.Select-menu-outer',
+      '.dropdown-menu',
     ];
 
-    let listboxLocator = null;
-    for (const sel of listboxSelectors) {
+    let hasMenu = false;
+    for (const selector of listboxSelectors) {
       try {
-        await page.locator(sel).first().waitFor({ state: 'visible', timeout: 3000 });
-        listboxLocator = page.locator(sel).first();
+        await page.locator(selector).first().waitFor({ state: 'visible', timeout: 1200 });
+        hasMenu = true;
         break;
       } catch {
-        // try next selector
+        // continue
       }
     }
 
-    if (!listboxLocator) {
-      await page.keyboard.press('Escape');
+    const searchableInput = page.locator(
+      [
+        'input[aria-autocomplete]',
+        'input[role="combobox"]',
+        '.react-select__input input',
+        '.ant-select-selection-search-input',
+      ].join(', '),
+    ).first();
+
+    if (!hasMenu) {
+      const inputCount = await searchableInput.count();
+      if (inputCount > 0) {
+        await searchableInput.fill(value);
+        await page.keyboard.press('Enter');
+        return true;
+      }
+      await page.keyboard.press('Escape').catch(() => null);
       return false;
     }
 
-    // 3. Find a matching option inside the listbox
-    const optionSelectors = ['[role="option"]', '[role="menuitem"]', 'li'];
+    const optionSelectors = [
+      '[role="option"]',
+      '[role="menuitem"]',
+      '.MuiAutocomplete-option',
+      '.ant-select-item-option',
+      '.react-select__option',
+      '.Select-option',
+      'li',
+    ];
+    let matchingOption = await findMatchingOption(page, optionSelectors, value);
 
-    for (const optSel of optionSelectors) {
-      const option = listboxLocator.locator(optSel).filter({ hasText: new RegExp(escapeRegex(value), 'i') }).first();
-      const count = await option.count();
-      if (count > 0) {
-        await option.click();
-        return true;
+    if (!matchingOption) {
+      const inputCount = await searchableInput.count();
+      if (inputCount > 0) {
+        await searchableInput.fill('');
+        await searchableInput.type(value, { delay: 30 });
+        await page.waitForTimeout(250);
+        matchingOption = await findMatchingOption(page, optionSelectors, value);
       }
     }
 
-    // 4. No matching option found — close and return false
-    await page.keyboard.press('Escape');
+    if (matchingOption) {
+      await matchingOption.click();
+      return true;
+    }
+
+    const inputCount = await searchableInput.count();
+    if (inputCount > 0) {
+      await searchableInput.fill(value);
+      await page.keyboard.press('Enter');
+      return true;
+    }
+
+    await page.keyboard.press('Escape').catch(() => null);
     return false;
   } catch {
-    // On any error: try to close the dropdown and bail
-    try {
-      await page.keyboard.press('Escape');
-    } catch {
-      // ignore secondary error
-    }
+    await page.keyboard.press('Escape').catch(() => null);
     return false;
   }
 }
 
 /**
- * Fills an autocomplete input by typing the first 3 characters and selecting
+ * Fills an autocomplete input by typing a short prefix and selecting
  * a matching suggestion. Falls back to typing the full value if no suggestion
  * matches.
  *
@@ -88,43 +149,40 @@ export async function fillAutocomplete(
 ): Promise<boolean> {
   try {
     const input = page.locator(inputSelector).first();
+    await input.waitFor({ state: 'visible', timeout: 2000 });
 
-    // 1. Click and type the first 3 chars to trigger suggestions
     await input.click();
-    await input.type(value.slice(0, 3), { delay: 80 });
+    await input.fill('');
+    await input.type(value.slice(0, 4), { delay: 50 });
 
-    // 2. Wait for suggestions to appear
-    const suggestionSelector = '[role="option"], [role="listitem"], .autocomplete-suggestion';
+    const suggestionSelectors = [
+      '[role="option"]',
+      '[role="listitem"]',
+      '.autocomplete-suggestion',
+      '.MuiAutocomplete-option',
+      '.ant-select-item-option',
+      '.react-select__option',
+      '.Select-option',
+    ];
+    const suggestionSelector = suggestionSelectors.join(', ');
+
     try {
-      await page.locator(suggestionSelector).first().waitFor({ state: 'visible', timeout: 2000 });
+      await page.locator(suggestionSelector).first().waitFor({ state: 'visible', timeout: 1500 });
     } catch {
-      // No suggestions — fall back to typing the full value
       await input.fill(value);
       return false;
     }
 
-    // 3. Find a suggestion containing the value text
-    const suggestion = page
-      .locator(suggestionSelector)
-      .filter({ hasText: new RegExp(escapeRegex(value), 'i') })
-      .first();
-
-    const count = await suggestion.count();
-    if (count > 0) {
+    const suggestion = await findMatchingOption(page, suggestionSelectors, value);
+    if (suggestion) {
       await suggestion.click();
       return true;
     }
 
-    // 4. No matching suggestion — clear and type the full value
     await input.fill(value);
     return false;
   } catch {
-    // Fallback: try to fill with full value
-    try {
-      await page.locator(inputSelector).first().fill(value);
-    } catch {
-      // ignore
-    }
+    await page.locator(inputSelector).first().fill(value).catch(() => null);
     return false;
   }
 }
