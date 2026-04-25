@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { FormField, FillResult, UserProfile } from './types';
+import { saveToCache } from './cache';
 
 /**
  * Resolves form field answers using a three-tier pipeline:
@@ -40,6 +41,10 @@ export class FormEngine {
       for (const field of unresolved) {
         const value = aiAnswers[field.label] ?? '';
         results.push({ label: field.label, value, source: value ? 'ai' : 'unfilled' });
+        // Save AI answers to cache for reuse in future applications
+        if (value) {
+          saveToCache(this.apiBase, field.label, value, 'ai').catch(() => {});
+        }
       }
     }
 

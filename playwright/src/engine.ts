@@ -22,6 +22,8 @@ import * as fs from 'fs';
 import { launchSession, getPage } from './session';
 import { FormEngine } from './form-engine';
 import { detectAdapter } from './adapters/index';
+import { detectAndSaveCorrections, CachedField } from './cache';
+import type { Page } from 'playwright';
 import type { EngineConfig, FillResult, JobResult, QueuedJob, UserProfile } from './types';
 import * as ui from './terminal-ui';
 
@@ -73,6 +75,55 @@ async function markApplied(apiBase: string, jobId: number): Promise<void> {
 
 async function removeFromQueue(apiBase: string, jobId: number): Promise<void> {
   await fetch(`${apiBase}/api/jobs/${jobId}/queue`, { method: 'DELETE' });
+}
+
+/**
+ * Snapshot all visible form field values on the current page.
+ * Returns a map of label → current value for correction detection.
+ */
+async function snapshotFormState(page: Page): Promise<Record<string, string>> {
+  try {
+    return await page.evaluate(() => {
+      const result: Record<string, string> = {};
+      const inputs = document.querySelectorAll<HTMLElement>(
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select',
+      );
+      for (const el of inputs) {
+        let label = '';
+        const id = el.getAttribute('id');
+        if (id) {
+          const labelEl = document.querySelector(`label[for="${id}"]`);
+          if (labelEl?.textContent) label = labelEl.textContent.replace(/\s+/g, ' ').trim().replace(/\s*\*+\s*$/, '');
+        }
+        if (!label) label = el.getAttribute('aria-label')?.trim() ?? '';
+        if (!label) {
+          const enclosing = el.closest('label');
+          if (enclosing?.textContent) label = enclosing.textContent.replace(/\s+/g, ' ').trim().replace(/\s*\*+\s*$/, '');
+        }
+        if (!label) {
+          if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+            label = el.placeholder?.trim() ?? '';
+        }
+        if (!label) continue;
+
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'select') {
+          const sel = el as HTMLSelectElement;
+          result[label] = sel.options[sel.selectedIndex]?.text?.trim() ?? '';
+        } else if (el instanceof HTMLInputElement && (el.type === 'radio' || el.type === 'checkbox')) {
+          if (el.checked) {
+            const prev = result[label];
+            result[label] = prev ? `${prev}, ${el.value}` : el.value;
+          }
+        } else {
+          result[label] = (el as HTMLInputElement).value ?? '';
+        }
+      }
+      return result;
+    });
+  } catch {
+    return {};
+  }
 }
 
 async function saveSession(apiBase: string, jobId: number, adapterName: string, fillResults: FillResult[]): Promise<void> {
@@ -216,9 +267,24 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
         continue;
       }
 
+      // Snapshot form state after user review (captures any manual corrections)
+      const postSubmitState = await snapshotFormState(page);
+
+      // Detect and save corrections (compare what we filled vs what user changed)
+      const preFillData: CachedField[] = fillResults
+        .filter(r => r.source !== 'unfilled' && r.value)
+        .map(r => ({ label: r.label, value: r.value, source: r.source as CachedField['source'] }));
+      const corrections = await detectAndSaveCorrections(config.apiBase, preFillData, postSubmitState);
+      if (corrections.length > 0) {
+        console.log(`[Engine] Learned ${corrections.length} correction(s) from your edits:`);
+        for (const c of corrections) {
+          console.log(`  "${c.question_text}": "${c.original_answer}" → "${c.corrected_answer}"`);
+        }
+      }
+
       // Mark as applied
       await markApplied(config.apiBase, job.id);
-      // Optionally save application session (non-blocking, errors ignored)
+      // Save application session
       await saveSession(config.apiBase, job.id, adapterName, fillResults);
       ui.printSuccess(job);
       results.push({ jobId: job.id, title: job.title, company: job.company, status: 'applied', fillResults, adapterUsed: adapterName });

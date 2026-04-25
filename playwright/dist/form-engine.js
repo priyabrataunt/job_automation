@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FormEngine = void 0;
 const crypto = __importStar(require("crypto"));
+const cache_1 = require("./cache");
 /**
  * Resolves form field answers using a three-tier pipeline:
  *   1. Profile data  (instant, free)
@@ -71,6 +72,10 @@ class FormEngine {
             for (const field of unresolved) {
                 const value = aiAnswers[field.label] ?? '';
                 results.push({ label: field.label, value, source: value ? 'ai' : 'unfilled' });
+                // Save AI answers to cache for reuse in future applications
+                if (value) {
+                    (0, cache_1.saveToCache)(this.apiBase, field.label, value, 'ai').catch(() => { });
+                }
             }
         }
         return results;

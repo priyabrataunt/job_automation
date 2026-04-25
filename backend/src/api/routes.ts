@@ -1203,4 +1203,71 @@ Guidelines:
         await db.prepare('DELETE FROM answer_cache WHERE id = ?').run(numId);
         return reply.send({ ok: true });
     });
+
+    // ── Application Session Endpoints ─────────────────────────────────────────
+    // POST /api/sessions — save an application session from the Playwright engine
+    app.post('/api/sessions', async (request, reply) => {
+        const { jobId, adapterName, fillResults, appliedAt } = request.body as {
+            jobId: number;
+            adapterName?: string;
+            fillResults?: Array<{ label: string; value: string; source: string }>;
+            appliedAt?: string;
+        };
+        if (!jobId) return reply.code(400).send({ error: 'jobId is required' });
+
+        const fieldsFilled = fillResults?.filter(f => f.source !== 'unfilled').length ?? 0;
+        const fieldsTotal = fillResults?.length ?? 0;
+        const fieldsCorrected = 0; // Updated later by correction detection
+
+        const result = await db.prepare(
+            `INSERT INTO application_sessions
+             (job_id, status, fields_total, fields_filled, fields_corrected, adapter_used, completed_at, form_snapshot)
+             VALUES (?, 'submitted', ?, ?, ?, ?, ?, ?)`
+        ).run(
+            jobId,
+            fieldsTotal,
+            fieldsFilled,
+            fieldsCorrected,
+            adapterName ?? 'unknown',
+            appliedAt ?? new Date().toISOString(),
+            JSON.stringify(fillResults ?? []),
+        );
+
+        return reply.send({ ok: true, id: result.lastInsertRowid });
+    });
+
+    // GET /api/sessions — list recent application sessions
+    app.get('/api/sessions', async (request, reply) => {
+        const { limit = '20', offset = '0' } = request.query as { limit?: string; offset?: string };
+        const lim = Math.min(parseInt(limit) || 20, 100);
+        const off = parseInt(offset) || 0;
+        const sessions = await db.prepare(
+            `SELECT s.*, j.title, j.company
+             FROM application_sessions s
+             LEFT JOIN jobs j ON j.id = s.job_id
+             ORDER BY s.started_at DESC
+             LIMIT ? OFFSET ?`
+        ).all(lim, off);
+        const totalRow = await db.prepare('SELECT COUNT(*) AS count FROM application_sessions').get<{ count: number }>();
+        return reply.send({ sessions, total: Number(totalRow?.count ?? 0) });
+    });
+
+    // PATCH /api/sessions/:id — update session (e.g. after correction detection)
+    app.patch('/api/sessions/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const numId = parseInt(id);
+        if (isNaN(numId)) return reply.code(400).send({ error: 'Invalid id' });
+        const { fields_corrected, form_snapshot } = request.body as {
+            fields_corrected?: number;
+            form_snapshot?: any;
+        };
+        const sets: string[] = [];
+        const params: any[] = [];
+        if (fields_corrected !== undefined) { sets.push('fields_corrected = ?'); params.push(fields_corrected); }
+        if (form_snapshot !== undefined) { sets.push('form_snapshot = ?'); params.push(JSON.stringify(form_snapshot)); }
+        if (sets.length === 0) return reply.code(400).send({ error: 'No fields to update' });
+        params.push(numId);
+        await db.prepare(`UPDATE application_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+        return reply.send({ ok: true });
+    });
 }

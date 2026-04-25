@@ -56,6 +56,7 @@ const fs = __importStar(require("fs"));
 const session_1 = require("./session");
 const form_engine_1 = require("./form-engine");
 const index_1 = require("./adapters/index");
+const cache_1 = require("./cache");
 const ui = __importStar(require("./terminal-ui"));
 // ── Config ────────────────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -96,6 +97,58 @@ async function markApplied(apiBase, jobId) {
 }
 async function removeFromQueue(apiBase, jobId) {
     await fetch(`${apiBase}/api/jobs/${jobId}/queue`, { method: 'DELETE' });
+}
+/**
+ * Snapshot all visible form field values on the current page.
+ * Returns a map of label → current value for correction detection.
+ */
+async function snapshotFormState(page) {
+    try {
+        return await page.evaluate(() => {
+            const result = {};
+            const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select');
+            for (const el of inputs) {
+                let label = '';
+                const id = el.getAttribute('id');
+                if (id) {
+                    const labelEl = document.querySelector(`label[for="${id}"]`);
+                    if (labelEl?.textContent)
+                        label = labelEl.textContent.replace(/\s+/g, ' ').trim().replace(/\s*\*+\s*$/, '');
+                }
+                if (!label)
+                    label = el.getAttribute('aria-label')?.trim() ?? '';
+                if (!label) {
+                    const enclosing = el.closest('label');
+                    if (enclosing?.textContent)
+                        label = enclosing.textContent.replace(/\s+/g, ' ').trim().replace(/\s*\*+\s*$/, '');
+                }
+                if (!label) {
+                    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+                        label = el.placeholder?.trim() ?? '';
+                }
+                if (!label)
+                    continue;
+                const tag = el.tagName.toLowerCase();
+                if (tag === 'select') {
+                    const sel = el;
+                    result[label] = sel.options[sel.selectedIndex]?.text?.trim() ?? '';
+                }
+                else if (el instanceof HTMLInputElement && (el.type === 'radio' || el.type === 'checkbox')) {
+                    if (el.checked) {
+                        const prev = result[label];
+                        result[label] = prev ? `${prev}, ${el.value}` : el.value;
+                    }
+                }
+                else {
+                    result[label] = el.value ?? '';
+                }
+            }
+            return result;
+        });
+    }
+    catch {
+        return {};
+    }
 }
 async function saveSession(apiBase, jobId, adapterName, fillResults) {
     try {
@@ -224,9 +277,22 @@ async function run(config = DEFAULT_CONFIG) {
                 results.push({ jobId: job.id, title: job.title, company: job.company, status: 'skipped' });
                 continue;
             }
+            // Snapshot form state after user review (captures any manual corrections)
+            const postSubmitState = await snapshotFormState(page);
+            // Detect and save corrections (compare what we filled vs what user changed)
+            const preFillData = fillResults
+                .filter(r => r.source !== 'unfilled' && r.value)
+                .map(r => ({ label: r.label, value: r.value, source: r.source }));
+            const corrections = await (0, cache_1.detectAndSaveCorrections)(config.apiBase, preFillData, postSubmitState);
+            if (corrections.length > 0) {
+                console.log(`[Engine] Learned ${corrections.length} correction(s) from your edits:`);
+                for (const c of corrections) {
+                    console.log(`  "${c.question_text}": "${c.original_answer}" → "${c.corrected_answer}"`);
+                }
+            }
             // Mark as applied
             await markApplied(config.apiBase, job.id);
-            // Optionally save application session (non-blocking, errors ignored)
+            // Save application session
             await saveSession(config.apiBase, job.id, adapterName, fillResults);
             ui.printSuccess(job);
             results.push({ jobId: job.id, title: job.title, company: job.company, status: 'applied', fillResults, adapterUsed: adapterName });
