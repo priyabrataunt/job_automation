@@ -55,6 +55,15 @@ export function printFieldSummary(results: FillResult[], adapterName: string): v
   }
 }
 
+export function printAuthStatus(message: string): void {
+  console.log(`\n  [Auth] ${message}`);
+}
+
+export function printAuthPrompt(): void {
+  console.log('  Complete sign-in/sign-up in the browser if needed.');
+  console.log('  Press Enter to continue | s to skip this job | q to quit...');
+}
+
 export function printControls(): void {
   console.log('\n  Press Enter to focus browser | s to skip | q to quit...');
 }

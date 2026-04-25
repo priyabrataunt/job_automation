@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.printHeader = printHeader;
 exports.printJobHeader = printJobHeader;
 exports.printFieldSummary = printFieldSummary;
+exports.printAuthStatus = printAuthStatus;
+exports.printAuthPrompt = printAuthPrompt;
 exports.printControls = printControls;
 exports.printSubmitControls = printSubmitControls;
 exports.waitForUserAction = waitForUserAction;
@@ -57,6 +59,13 @@ function printFieldSummary(results, adapterName) {
             console.log(`  ${icon} ${r.label} → ${val} (${label})`);
         }
     }
+}
+function printAuthStatus(message) {
+    console.log(`\n  [Auth] ${message}`);
+}
+function printAuthPrompt() {
+    console.log('  Complete sign-in/sign-up in the browser if needed.');
+    console.log('  Press Enter to continue | s to skip this job | q to quit...');
 }
 function printControls() {
     console.log('\n  Press Enter to focus browser | s to skip | q to quit...');

@@ -9,6 +9,14 @@ exports.lever = {
         try {
             const url = page.url();
             if (url.includes('jobs.lever.co') || url.includes('jobs.eu.lever.co')) {
+                const pageState = await page.evaluate(() => {
+                    const text = (document.body?.innerText ?? '').toLowerCase();
+                    const hasPassword = !!document.querySelector('input[type="password"]');
+                    const hasApplySignals = /(resume|cover letter|work authorization|submit application|apply for this job)/i.test(text);
+                    return { hasPassword, hasApplySignals };
+                });
+                if (pageState.hasPassword && !pageState.hasApplySignals)
+                    return false;
                 return true;
             }
             // DOM-based signals

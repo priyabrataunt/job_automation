@@ -91,8 +91,22 @@ export interface JobResult {
   company: string;
   status: 'applied' | 'skipped' | 'error';
   error?: string;
+  skipReason?: string;
   fillResults?: FillResult[];
   adapterUsed?: string;
+}
+
+export type AuthPreflightState =
+  | 'application-ready'
+  | 'auth-handled'
+  | 'auth-required'
+  | 'manual-auth-required'
+  | 'auth-failed';
+
+export interface AuthPreflightResult {
+  state: AuthPreflightState;
+  reason: string;
+  pageUrl: string;
 }
 
 // ── Engine Config ──────────────────────────────────────────────────────────────

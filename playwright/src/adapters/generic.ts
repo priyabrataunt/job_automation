@@ -11,6 +11,19 @@ export const generic: PlatformAdapter = {
   },
 
   async fillForm(page: Page, engine: FormEngine, job: QueuedJob): Promise<FillResult[]> {
+    const looksLikeAuthPage = await page.evaluate(() => {
+      const text = (document.body?.innerText ?? '').toLowerCase();
+      const hasPassword = !!document.querySelector('input[type="password"]');
+      const hasAuthText = /(sign in|signin|log in|login|create account|sign up|signup|continue with)/i.test(text);
+      const hasApplySignals = /(resume|cover letter|work authorization|submit application|apply for this job)/i.test(text);
+      return hasPassword && hasAuthText && !hasApplySignals;
+    });
+
+    if (looksLikeAuthPage) {
+      console.warn('[generic] Auth/login page detected; skipping generic fill for this step');
+      return [];
+    }
+
     for (const selector of ['form', 'main', 'body']) {
       try {
         await page.waitForSelector(selector, { timeout: 5000 });

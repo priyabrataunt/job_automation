@@ -57,6 +57,7 @@ const session_1 = require("./session");
 const form_engine_1 = require("./form-engine");
 const index_1 = require("./adapters/index");
 const cache_1 = require("./cache");
+const auth_handler_1 = require("./auth-handler");
 const ui = __importStar(require("./terminal-ui"));
 // ── Config ────────────────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -64,6 +65,9 @@ const DEFAULT_CONFIG = {
     profilePath: process.env.PROFILE_PATH ?? path.join(os.homedir(), '.job-automation', 'profile.json'),
     headless: process.env.HEADLESS === 'true',
 };
+const AUTH_MAX_ATTEMPTS = 2;
+const LOG_DIR = path.join(os.homedir(), '.job-automation', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'apply-engine-events.jsonl');
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function loadProfile(profilePath) {
     const resolved = profilePath.replace(/^~/, os.homedir());
@@ -162,6 +166,61 @@ async function saveSession(apiBase, jobId, adapterName, fillResults) {
         // Optional — silently ignore if endpoint doesn't exist or errors
     }
 }
+function appendRunEvent(event) {
+    try {
+        fs.mkdirSync(LOG_DIR, { recursive: true });
+        fs.appendFileSync(LOG_FILE, `${JSON.stringify({ timestamp: new Date().toISOString(), ...event })}\n`);
+    }
+    catch {
+        // Monitoring must never block the engine
+    }
+}
+async function ensureApplicationReady(page, profile, job) {
+    let latest = {
+        state: 'application-ready',
+        reason: 'not-run',
+        pageUrl: page.url(),
+    };
+    for (let attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
+        latest = await (0, auth_handler_1.runAuthPreflight)(page, profile);
+        appendRunEvent({
+            event: 'auth-preflight',
+            jobId: job.id,
+            jobTitle: job.title,
+            attempt,
+            state: latest.state,
+            reason: latest.reason,
+            pageUrl: latest.pageUrl,
+        });
+        if (latest.state === 'application-ready' || latest.state === 'auth-handled') {
+            if (latest.state === 'auth-handled') {
+                ui.printAuthStatus(`Auth completed (${latest.reason}).`);
+            }
+            return { decision: 'ready', authResult: latest };
+        }
+        if (latest.state === 'manual-auth-required') {
+            ui.printAuthStatus(`Manual auth required (${latest.reason}).`);
+            ui.printAuthPrompt();
+            const action = await ui.waitForUserAction();
+            if (action === 'quit')
+                return { decision: 'quit', authResult: latest };
+            if (action === 'skip')
+                return { decision: 'skip', authResult: latest };
+            continue;
+        }
+        if (attempt < AUTH_MAX_ATTEMPTS) {
+            ui.printAuthStatus(`Auth attempt ${attempt} failed (${latest.reason}). Retrying once...`);
+            try {
+                await page.goto(job.apply_url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            }
+            catch {
+                // next loop iteration will fail with current page state and skip safely
+            }
+            continue;
+        }
+    }
+    return { decision: 'skip', authResult: latest };
+}
 // ── Main runner ───────────────────────────────────────────────────────────────
 async function run(config = DEFAULT_CONFIG) {
     ui.printHeader();
@@ -211,6 +270,30 @@ async function run(config = DEFAULT_CONFIG) {
                 const msg = err.message ?? String(err);
                 ui.printError(job, `Navigation failed: ${msg}`);
                 results.push({ jobId: job.id, title: job.title, company: job.company, status: 'error', error: msg });
+                continue;
+            }
+            const authGate = await ensureApplicationReady(page, profile, job);
+            if (authGate.decision === 'quit') {
+                console.log('\n[Engine] Quitting — remaining jobs stay queued.');
+                break;
+            }
+            if (authGate.decision === 'skip') {
+                ui.printSkipped(job);
+                await removeFromQueue(config.apiBase, job.id);
+                results.push({
+                    jobId: job.id,
+                    title: job.title,
+                    company: job.company,
+                    status: 'skipped',
+                    skipReason: `auth: ${authGate.authResult.reason}`,
+                });
+                appendRunEvent({
+                    event: 'job-skipped-auth',
+                    jobId: job.id,
+                    jobTitle: job.title,
+                    reason: authGate.authResult.reason,
+                    pageUrl: authGate.authResult.pageUrl,
+                });
                 continue;
             }
             // Detect platform adapter and fill the form
