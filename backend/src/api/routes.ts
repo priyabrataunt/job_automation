@@ -64,6 +64,61 @@ function quickVisaSignal(text: string): number {
 function stripHtml(html: string): string {
     return html.replace(/<[^>]+>/g, ' ').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
 }
+type AiFillField = {
+    label: string;
+    type: string;
+    options?: string[];
+};
+function isOpenEndedField(field: AiFillField): boolean {
+    const label = field.label.toLowerCase();
+    if (field.type === 'textarea') {
+        return true;
+    }
+    if (field.type === 'select' || field.type === 'radio' || field.type === 'checkbox') {
+        return false;
+    }
+    return [
+        'why ',
+        'why?',
+        'tell us',
+        'describe',
+        'explain',
+        'share',
+        'interested',
+        'motivation',
+        'about yourself',
+        'cover letter',
+        'projects',
+        'experience working',
+        'what makes you',
+        'how do you',
+    ].some(pattern => label.includes(pattern)) || label.endsWith('?') || label.length > 80;
+}
+function chooseAiFillModel(field: AiFillField): 'gpt-5-nano' | 'gpt-5.1' {
+    return isOpenEndedField(field) ? 'gpt-5.1' : 'gpt-5-nano';
+}
+async function buildAiFillPrompt(
+    client: OpenAI,
+    prompt: string,
+    model: 'gpt-5-nano' | 'gpt-5.1',
+): Promise<Record<string, string>> {
+    const messages: Array<{
+        role: 'system' | 'user';
+        content: string;
+    }> = [];
+    if (writingStylePrompt)
+        messages.push({ role: 'system', content: writingStylePrompt });
+    messages.push({ role: 'user', content: prompt });
+    const completion = await client.chat.completions.create({
+        model,
+        max_completion_tokens: model === 'gpt-5.1' ? 1200 : 800,
+        response_format: { type: 'json_object' },
+        messages,
+    });
+    const raw = completion.choices[0]?.message?.content || '{}';
+    const parsed = JSON.parse(raw);
+    return parsed.answers || {};
+}
 async function fetchWorkdayDescription(applyUrl: string): Promise<string> {
     try {
         // Parse the Workday apply URL to construct the detail API URL
@@ -569,7 +624,7 @@ ${stripHtml(description).slice(0, 3000)}
             messages.push({ role: 'system', content: writingStylePrompt });
         messages.push({ role: 'user', content: prompt });
         const completion = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-5',
             max_tokens: 600,
             messages,
         });
@@ -590,7 +645,7 @@ ${stripHtml(description).slice(0, 3000)}
         }
         const client = new OpenAI({ apiKey });
         const extraction = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-5',
             max_tokens: 200,
             response_format: { type: 'json_object' },
             messages: [{
@@ -640,11 +695,7 @@ ${jdText.slice(0, 4000)}`,
             return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
         }
         const { fields, profile, jobDescription } = request.body as {
-            fields: Array<{
-                label: string;
-                type: string;
-                options?: string[];
-            }>;
+            fields: AiFillField[];
             profile: Record<string, any>;
             jobDescription?: string;
         };
@@ -666,7 +717,16 @@ ${jdText.slice(0, 4000)}`,
         const jdSection = jobDescription?.trim()
             ? `\n## Job Description\n${jobDescription.slice(0, 2000)}\n`
             : '';
-        const prompt = `You are filling out a job application form on behalf of a candidate.
+        try {
+            const client = new OpenAI({ apiKey });
+            const answers: Record<string, string> = {};
+            const groupedFields = {
+                'gpt-5-nano': cappedFields.filter(field => chooseAiFillModel(field) === 'gpt-5-nano'),
+                'gpt-5.1': cappedFields.filter(field => chooseAiFillModel(field) === 'gpt-5.1'),
+            } as const;
+            for (const [model, modelFields] of Object.entries(groupedFields) as Array<['gpt-5-nano' | 'gpt-5.1', AiFillField[]]>) {
+                if (!modelFields.length) continue;
+                const prompt = `You are filling out a job application form on behalf of a candidate.
 Given the candidate's profile and a list of form fields, provide the best answer for each field.
 
 ## Candidate Profile
@@ -688,7 +748,7 @@ Notice period: ${answers.notice_period || ''}
 Pronouns: ${answers.pronouns || ''}
 ${resumeSection}${jdSection}
 ## Form Fields to Fill
-${JSON.stringify(cappedFields, null, 2)}
+${JSON.stringify(modelFields, null, 2)}
 
 ## Instructions
 - For "select" or "radio" fields, you MUST choose one of the provided options exactly as written.
@@ -697,24 +757,10 @@ ${JSON.stringify(cappedFields, null, 2)}
 - If you cannot determine a good answer, use an empty string "".
 - Output ONLY valid JSON in this exact format, no prose, no markdown code fences:
 {"answers": {"<label text>": "<answer>", ...}}`;
-        try {
-            const client = new OpenAI({ apiKey });
-            const aiFillMessages: Array<{
-                role: 'system' | 'user';
-                content: string;
-            }> = [];
-            if (writingStylePrompt)
-                aiFillMessages.push({ role: 'system', content: writingStylePrompt });
-            aiFillMessages.push({ role: 'user', content: prompt });
-            const completion = await client.chat.completions.create({
-                model: 'gpt-4o-mini',
-                max_completion_tokens: 1200,
-                response_format: { type: 'json_object' },
-                messages: aiFillMessages,
-            });
-            const raw = completion.choices[0]?.message?.content || '{}';
-            const parsed = JSON.parse(raw);
-            return reply.send({ answers: parsed.answers || {} });
+                const modelAnswers = await buildAiFillPrompt(client, prompt, model);
+                Object.assign(answers, modelAnswers);
+            }
+            return reply.send({ answers });
         }
         catch (err: any) {
             console.error('[ai-fill] error:', err);
@@ -770,7 +816,7 @@ Guidelines:
                 followUpMessages.push({ role: 'system', content: writingStylePrompt });
             followUpMessages.push({ role: 'user', content: prompt });
             const completion = await client.chat.completions.create({
-                model: 'gpt-4o-mini',
+                model: 'gpt-5',
                 max_tokens: 200,
                 messages: followUpMessages,
             });
