@@ -165,12 +165,12 @@ function ScoreBar({ score }) {
   )
 }
 
-function ScoreTooltip({ details, score, children }) {
+function ScoreTooltip({ details, children }) {
   const [show, setShow] = useState(false)
   const ref = useRef(null)
   let parsed = null
   if (details) {
-    try { parsed = typeof details === 'string' ? JSON.parse(details) : details } catch {}
+    try { parsed = typeof details === 'string' ? JSON.parse(details) : details } catch { parsed = null }
   }
 
   return (
@@ -280,7 +280,9 @@ function JobCard({ job, onStatusChange, onOptimize, onQueue }) {
       const parsed = typeof job.raw_json === 'string' ? JSON.parse(job.raw_json) : job.raw_json
       const manualDescription = parsed?.manualContext?.jobDescription
       if (manualDescription) fullDescription = manualDescription
-    } catch {}
+    } catch {
+      fullDescription = job.description || job.description_snippet || ''
+    }
   }
 
   return (
@@ -467,7 +469,12 @@ function CacheViewer() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchEntries() }, [fetchEntries])
+  useEffect(() => {
+    async function loadEntries() {
+      await fetchEntries()
+    }
+    loadEntries()
+  }, [fetchEntries])
 
   const handleSearch = useCallback((e) => {
     const q = e.target.value
@@ -624,12 +631,6 @@ function PreferencesPanel({ prefs, onSave }) {
   const [blocklist, setBlocklist] = useState(prefs.company_blocklist?.join(', ') || '')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-
-  useEffect(() => {
-    setKeywords(prefs.keywords?.join(', ') || '')
-    setAllowlist(prefs.company_allowlist?.join(', ') || '')
-    setBlocklist(prefs.company_blocklist?.join(', ') || '')
-  }, [prefs])
 
   const parseList = (str) => str.split(',').map(s => s.trim()).filter(Boolean)
 
@@ -1154,7 +1155,12 @@ function FollowUpView({ onStatusChange, onOptimize }) {
     setLoading(false)
   }
 
-  useEffect(() => { load(days) }, [days])
+  useEffect(() => {
+    async function loadFollowUps() {
+      await load(days)
+    }
+    loadFollowUps()
+  }, [days])
 
   function handleStatusChange(id, status) {
     onStatusChange(id, status)
@@ -1237,7 +1243,12 @@ function HistoryView({ onStatusChange, onOptimize }) {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    async function loadHistory() {
+      await load()
+    }
+    loadHistory()
+  }, [])
 
   function handleStatusChange(id, status) {
     onStatusChange(id, status)
@@ -1792,8 +1803,6 @@ export default function App() {
     entry_only: '',
   })
 
-  const statusFilterForTab = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : filters.status
-
   const fetchJobs = useCallback(async (currentFilters, currentOffset, statusOverride) => {
     const params = new URLSearchParams()
     Object.entries(currentFilters).forEach(([k, v]) => { if (v !== '') params.set(k, v) })
@@ -2079,7 +2088,11 @@ export default function App() {
         {tab === 'prefs' && (
           <div>
             <h2 style={{ color: 'var(--text-primary)', margin: '0 0 16px', fontSize: 18 }}>Settings</h2>
-            <PreferencesPanel prefs={prefs} onSave={(updated) => setPrefs(updated)} />
+            <PreferencesPanel
+              key={JSON.stringify(prefs)}
+              prefs={prefs}
+              onSave={(updated) => setPrefs(updated)}
+            />
             <CacheViewer />
           </div>
         )}

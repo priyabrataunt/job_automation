@@ -1,0 +1,8 @@
+{
+  "files.exclude": {
+    "**/playwright/dist": true
+  },
+  "search.exclude": {
+    "**/playwright/dist": true
+  }
+}
