@@ -159,6 +159,21 @@
       font-weight: 600;
     }
     #jd-clear:hover { text-decoration: underline; }
+
+    .queue-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #313244;
+      gap: 8px;
+    }
+    .queue-item:last-child { border-bottom: none; }
+    .queue-item-text { flex: 1; min-width: 0; }
+    .queue-item-title { font-size: 12px; font-weight: 600; color: #cdd6f4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .queue-item-company { font-size: 10px; color: #a6adc8; }
+    .btn-open { padding: 4px 10px; font-size: 11px; white-space: nowrap; background: #1e66f5; color: #fff; border: none; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
+    .btn-open:hover { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -179,6 +194,14 @@
         <span id="ats-label">Scanning...</span>
       </div>
       <div id="field-summary" class="field-list" style="margin-top:8px;display:none"></div>
+    </div>
+
+    <!-- Assisted Queue -->
+    <div class="section" id="assisted-queue-section">
+      <div class="section-title">Assisted Queue</div>
+      <div id="assisted-queue-list">
+        <div style="color:var(--text-muted,#6c7086);font-size:11px;text-align:center;padding:8px 0">Loading...</div>
+      </div>
     </div>
 
     <!-- Job Context -->

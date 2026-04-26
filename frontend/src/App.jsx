@@ -896,6 +896,20 @@ function QueueView() {
     }
   }
 
+  async function handleModeChange(jobId, newMode) {
+    setQueueJobs(prev => prev.map(j => j.id === jobId ? { ...j, mode: newMode } : j))
+    try {
+      const res = await fetch(`${API}/api/jobs/${jobId}/queue-mode`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      })
+      if (!res.ok) throw new Error('mode update failed')
+    } catch {
+      load() // rollback to server state
+    }
+  }
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -973,10 +987,40 @@ function QueueView() {
                   >{job.title}</a>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{job.company}</span>
                   {job.ats_source && <SourceBadge source={job.ats_source} />}
+                  {/* Mode badge */}
+                  <span
+                    title={job.mode_reason || undefined}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: 99,
+                      background: job.mode === 'assisted' ? '#3b2c00' : '#1e3a5f',
+                      color: job.mode === 'assisted' ? '#f9e2af' : '#89b4fa',
+                      cursor: job.mode_reason ? 'help' : 'default',
+                    }}
+                  >{job.mode === 'assisted' ? 'Assisted' : 'Bulk'}</span>
                 </div>
               </div>
               {/* Actions */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                {/* Mode selector */}
+                <select
+                  value={job.mode || 'bulk'}
+                  onChange={e => handleModeChange(job.id, e.target.value)}
+                  style={{
+                    background: 'var(--bg-surface-alt)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="bulk">Bulk</option>
+                  <option value="assisted">Assisted</option>
+                </select>
                 {job.apply_url && (
                   <a
                     href={job.apply_url}

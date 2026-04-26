@@ -210,7 +210,7 @@ async function ensureApplicationReady(
       return { decision: 'ready', authResult: latest };
     }
 
-    if (latest.state === 'manual-auth-required' || (latest.state as string) === 'demote-to-assisted') {
+    if (latest.state === 'demote-to-assisted') {
       return { decision: 'demote', authResult: latest };
     }
 

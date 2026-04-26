@@ -221,6 +221,48 @@ function scoreJobMatch(job, context) {
   return score;
 }
 
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadAssistedQueue(profile) {
+  const baseUrl = getTrackerBaseUrl(profile);
+  const list = document.getElementById('assisted-queue-list');
+  try {
+    const res = await fetch(`${baseUrl}/api/jobs/queue?mode=assisted`);
+    const data = await res.json();
+    const jobs = data.jobs || [];
+    if (jobs.length === 0) {
+      list.innerHTML = '<div style="color:#6c7086;font-size:11px;text-align:center;padding:8px 0">No assisted jobs queued</div>';
+      return;
+    }
+    list.innerHTML = '';
+    for (const job of jobs) {
+      const item = document.createElement('div');
+      item.className = 'queue-item';
+      item.innerHTML = `
+        <div class="queue-item-text">
+          <div class="queue-item-title" title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</div>
+          <div class="queue-item-company">${escapeHtml(job.company)}</div>
+        </div>
+        <button class="btn-open" data-url="${escapeHtml(job.apply_url)}">Open</button>
+      `;
+      item.querySelector('.btn-open').addEventListener('click', async () => {
+        const url = job.apply_url;
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          chrome.tabs.update(tab.id, { url });
+        } else {
+          chrome.tabs.create({ url });
+        }
+      });
+      list.appendChild(item);
+    }
+  } catch {
+    list.innerHTML = '<div style="color:#f38ba8;font-size:11px;text-align:center;padding:8px 0">Could not load queue</div>';
+  }
+}
+
 // ── Load profile from storage ─────────────────────────────────────────────────
 
 async function loadProfile() {
@@ -354,6 +396,9 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     showMsg('Load your profile.json first (see README).', true);
     return;
   }
+
+  // Load assisted queue
+  loadAssistedQueue(profile);
 
   // ── JD context state ────────────────────────────────────────────────────────
   const storedJd = await new Promise(resolve => {
