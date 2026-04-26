@@ -5,7 +5,6 @@ type PageSignals = {
   hasPasswordInput: boolean;
   hasEmailInput: boolean;
   hasAuthCopy: boolean;
-  hasOauthButton: boolean;
   hasApplySignal: boolean;
   hasForm: boolean;
   hasApplyButton: boolean;
@@ -33,10 +32,6 @@ async function scanPageSignals(page: Page): Promise<PageSignals> {
     const hasPasswordInput = !!document.querySelector('input[type="password"]');
     const hasEmailInput = !!document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]');
     const hasAuthCopy = /(sign in|signin|log in|login|create account|sign up|signup|continue with|forgot password|welcome back)/i.test(bodyText);
-    const hasOauthButton = !!Array.from(document.querySelectorAll('button, a')).find((el) => {
-      const text = normalize(el.textContent ?? '');
-      return /(continue with google|sign in with google|continue with linkedin|sign in with linkedin|continue with github|single sign on|sso)/i.test(text);
-    });
 
     const hasForm = !!document.querySelector('form');
 
@@ -69,7 +64,6 @@ async function scanPageSignals(page: Page): Promise<PageSignals> {
       hasPasswordInput,
       hasEmailInput,
       hasAuthCopy,
-      hasOauthButton,
       hasApplySignal,
       hasForm,
       hasApplyButton: Boolean(applyButton),
@@ -83,12 +77,7 @@ function classifySignals(signals: PageSignals): AuthPreflightState {
   const looksLikeApplication = (signals.hasForm && (signals.hasApplySignal || signals.hasApplyButton)) && !signals.hasPasswordInput;
 
   if (looksLikeApplication) return 'application-ready';
-  if (looksLikeAuth) {
-    if (!signals.hasPasswordInput && signals.hasOauthButton) return 'manual-auth-required';
-    return 'auth-required';
-  }
-  if (signals.hasOauthButton && !signals.hasApplySignal) return 'manual-auth-required';
-
+  if (looksLikeAuth) return 'auth-required';
   return 'application-ready';
 }
 
@@ -160,10 +149,6 @@ export async function runAuthPreflight(page: Page, profile: UserProfile): Promis
     return { state: 'application-ready', reason: 'application-form-detected', pageUrl: page.url() };
   }
 
-  if (initialState === 'manual-auth-required') {
-    return { state: 'manual-auth-required', reason: 'oauth-or-manual-auth-required', pageUrl: page.url() };
-  }
-
   if (initialState !== 'auth-required') {
     return { state: 'application-ready', reason: 'no-auth-signals', pageUrl: page.url() };
   }
@@ -188,11 +173,7 @@ export async function runAuthPreflight(page: Page, profile: UserProfile): Promis
       return { state: 'auth-handled', reason: 'login-submitted-and-application-visible', pageUrl: page.url() };
     }
 
-    if (finalState === 'manual-auth-required') {
-      return { state: 'manual-auth-required', reason: 'manual-auth-step-after-login', pageUrl: page.url() };
-    }
-
-    return { state: 'auth-failed', reason: 'auth-submitted-but-application-not-visible', pageUrl: page.url() };
+    return { state: 'demote-to-assisted', reason: 'auth-submitted-but-application-not-visible', pageUrl: page.url() };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { state: 'auth-failed', reason: `auth-preflight-error: ${message}`, pageUrl: page.url() };

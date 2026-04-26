@@ -16,6 +16,8 @@ export interface Job {
   raw_json: string;
   first_seen_at: string;
   relevance_score?: number;
+  mode?: string;           // 'bulk' | 'assisted'
+  mode_reason?: string;    // set on auto-demote
 }
 
 export interface Company {

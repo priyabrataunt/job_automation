@@ -312,6 +312,8 @@ export async function initDb(): Promise<void> {
       opt_friendly INTEGER DEFAULT 0,
       sponsor_tier TEXT DEFAULT NULL,
       queue_position INTEGER DEFAULT NULL,
+      mode TEXT DEFAULT 'bulk',
+      mode_reason TEXT DEFAULT NULL,
       UNIQUE(external_id, ats_source)
     );
 
@@ -528,6 +530,14 @@ export async function initDb(): Promise<void> {
       console.log(`[DB] Set sponsor_tier for ${tiered} jobs`);
     }
   }
+
+  // Add mode/mode_reason columns if they don't exist (runtime migration)
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN mode TEXT DEFAULT 'bulk'");
+  } catch { /* column already exists */ }
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN mode_reason TEXT DEFAULT NULL");
+  } catch { /* column already exists */ }
 
   console.log('[DB] Neon/Postgres database initialized');
 }

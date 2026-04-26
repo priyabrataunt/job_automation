@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { createHash } from 'crypto';
+import { classifyUrl } from '../router/classifier';
 // Load writing-style reference so AI outputs sound like the user
 let writingStylePrompt = '';
 try {
@@ -987,13 +988,16 @@ Guidelines:
 
     // ── Queue Endpoints ────────────────────────────────────────────────────────
     // GET /api/jobs/queue — return queued jobs ordered by queue_position
-    app.get('/api/jobs/queue', async (_request, reply) => {
-        const jobs = await db.prepare(`
-      SELECT * FROM jobs
-      WHERE status = 'queued'
-        AND queue_position IS NOT NULL
-      ORDER BY queue_position ASC
-    `).all();
+    app.get('/api/jobs/queue', async (request, reply) => {
+        const { mode } = request.query as { mode?: string };
+        let query = `SELECT * FROM jobs WHERE status = 'queued' AND queue_position IS NOT NULL`;
+        const params: any[] = [];
+        if (mode === 'bulk' || mode === 'assisted') {
+            query += ` AND mode = ?`;
+            params.push(mode);
+        }
+        query += ` ORDER BY queue_position ASC`;
+        const jobs = await db.prepare(query).all(...params);
         return reply.send({ jobs, total: jobs.length });
     });
 
@@ -1003,9 +1007,14 @@ Guidelines:
     app.post('/api/jobs/:id/queue', async (request, reply) => {
         const { id } = request.params as { id: string };
         const jobId = parseInt(id);
+        // Get apply_url for classification
+        const job = await db.prepare('SELECT apply_url FROM jobs WHERE id = ?').get<{ apply_url: string }>(jobId);
+        if (!job) return reply.code(404).send({ error: 'job not found' });
+        const mode = classifyUrl(job.apply_url);
         const row = await db.prepare(
             `UPDATE jobs
              SET status = 'queued',
+                 mode = ?,
                  queue_position = (
                    SELECT COALESCE(MAX(q.queue_position), 0) + 1
                    FROM jobs q
@@ -1014,7 +1023,7 @@ Guidelines:
                  status_updated_at = NOW()
              WHERE id = ?
              RETURNING queue_position`
-        ).get<{ queue_position: number }>(jobId, jobId);
+        ).get<{ queue_position: number }>(mode, jobId, jobId);
         return reply.send({ ok: true, queue_position: row?.queue_position ?? 1 });
     });
 
@@ -1024,6 +1033,22 @@ Guidelines:
         await db.prepare(
             `UPDATE jobs SET status = 'saved', queue_position = NULL, status_updated_at = NOW() WHERE id = ?`
         ).run(parseInt(id));
+        return reply.send({ ok: true });
+    });
+
+    // PATCH /api/jobs/:id/queue-mode — override mode (bulk|assisted) or auto-demote
+    app.patch('/api/jobs/:id/queue-mode', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const { mode, mode_reason } = request.body as { mode: string; mode_reason?: string };
+        if (mode !== 'bulk' && mode !== 'assisted') {
+            return reply.code(400).send({ error: "mode must be 'bulk' or 'assisted'" });
+        }
+        const sets = ['mode = ?'];
+        const params: any[] = [mode];
+        if (mode_reason !== undefined) { sets.push('mode_reason = ?'); params.push(mode_reason); }
+        params.push(parseInt(id));
+        const result = await db.prepare(`UPDATE jobs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+        if (result.changes === 0) return reply.code(404).send({ error: 'job not found' });
         return reply.send({ ok: true });
     });
 

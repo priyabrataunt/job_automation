@@ -64,7 +64,7 @@ function loadProfile(profilePath: string): UserProfile {
 }
 
 async function fetchQueue(apiBase: string): Promise<QueuedJob[]> {
-  const res = await fetch(`${apiBase}/api/jobs/queue`);
+  const res = await fetch(`${apiBase}/api/jobs/queue?mode=bulk`);
   if (!res.ok) throw new Error(`Failed to load queue (${res.status}): ${res.statusText}`);
   const data = (await res.json()) as { jobs: QueuedJob[] };
   return data.jobs ?? [];
@@ -152,11 +152,39 @@ function appendRunEvent(event: Record<string, unknown>): void {
   }
 }
 
+async function hasCaptcha(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const title = document.title.toLowerCase();
+      if (title.includes('just a moment') || title.includes('attention required')) return true;
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      return iframes.some(f => {
+        const src = f.getAttribute('src') ?? '';
+        return src.includes('recaptcha') || src.includes('hcaptcha') || src.includes('turnstile');
+      });
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function demoteToAssisted(apiBase: string, jobId: number, reason: string): Promise<void> {
+  try {
+    await fetch(`${apiBase}/api/jobs/${jobId}/queue-mode`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'assisted', mode_reason: `auto-demote: ${reason}` }),
+    });
+  } catch {
+    // Best-effort — job stays in queue to be picked up by extension
+  }
+}
+
 async function ensureApplicationReady(
   page: Page,
   profile: UserProfile,
   job: QueuedJob,
-): Promise<{ decision: 'ready' | 'skip' | 'quit'; authResult: AuthPreflightResult }> {
+): Promise<{ decision: 'ready' | 'skip' | 'quit' | 'demote'; authResult: AuthPreflightResult }> {
   let latest: AuthPreflightResult = {
     state: 'application-ready',
     reason: 'not-run',
@@ -182,13 +210,8 @@ async function ensureApplicationReady(
       return { decision: 'ready', authResult: latest };
     }
 
-    if (latest.state === 'manual-auth-required') {
-      ui.printAuthStatus(`Manual auth required (${latest.reason}).`);
-      ui.printAuthPrompt();
-      const action = await ui.waitForUserAction();
-      if (action === 'quit') return { decision: 'quit', authResult: latest };
-      if (action === 'skip') return { decision: 'skip', authResult: latest };
-      continue;
+    if (latest.state === 'manual-auth-required' || (latest.state as string) === 'demote-to-assisted') {
+      return { decision: 'demote', authResult: latest };
     }
 
     if (attempt < AUTH_MAX_ATTEMPTS) {
@@ -263,10 +286,24 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
         continue;
       }
 
+      // Check for captcha/Cloudflare after navigation
+      if (await hasCaptcha(page)) {
+        await demoteToAssisted(config.apiBase, job.id, 'captcha');
+        ui.printAuthStatus(`Captcha detected — demoted to assisted (${job.title})`);
+        results.push({ jobId: job.id, title: job.title, company: job.company, status: 'skipped', skipReason: 'auto-demote: captcha' });
+        continue;
+      }
+
       const authGate = await ensureApplicationReady(page, profile, job);
       if (authGate.decision === 'quit') {
         console.log('\n[Engine] Quitting — remaining jobs stay queued.');
         break;
+      }
+      if (authGate.decision === 'demote') {
+        await demoteToAssisted(config.apiBase, job.id, authGate.authResult.reason);
+        ui.printAuthStatus(`Auth wall detected — demoted to assisted (${job.title})`);
+        results.push({ jobId: job.id, title: job.title, company: job.company, status: 'skipped', skipReason: `auto-demote: ${authGate.authResult.reason}` });
+        continue;
       }
       if (authGate.decision === 'skip') {
         ui.printSkipped(job);

@@ -100,7 +100,7 @@ export type AuthPreflightState =
   | 'application-ready'
   | 'auth-handled'
   | 'auth-required'
-  | 'manual-auth-required'
+  | 'demote-to-assisted'
   | 'auth-failed';
 
 export interface AuthPreflightResult {

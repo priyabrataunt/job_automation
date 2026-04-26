@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   opt_friendly INTEGER DEFAULT 0,
   sponsor_tier TEXT DEFAULT NULL,
   queue_position INTEGER DEFAULT NULL,
+  mode TEXT DEFAULT 'bulk',
+  mode_reason TEXT DEFAULT NULL,
   UNIQUE(external_id, ats_source)
 );
 
