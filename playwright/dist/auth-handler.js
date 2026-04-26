@@ -15,10 +15,6 @@ async function scanPageSignals(page) {
         const hasPasswordInput = !!document.querySelector('input[type="password"]');
         const hasEmailInput = !!document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]');
         const hasAuthCopy = /(sign in|signin|log in|login|create account|sign up|signup|continue with|forgot password|welcome back)/i.test(bodyText);
-        const hasOauthButton = !!Array.from(document.querySelectorAll('button, a')).find((el) => {
-            const text = normalize(el.textContent ?? '');
-            return /(continue with google|sign in with google|continue with linkedin|sign in with linkedin|continue with github|single sign on|sso)/i.test(text);
-        });
         const hasForm = !!document.querySelector('form');
         const hasApplySignal = !!Array.from(document.querySelectorAll('label, legend, h1, h2, p, span')).find((el) => {
             const text = normalize(el.textContent ?? '');
@@ -49,7 +45,6 @@ async function scanPageSignals(page) {
             hasPasswordInput,
             hasEmailInput,
             hasAuthCopy,
-            hasOauthButton,
             hasApplySignal,
             hasForm,
             hasApplyButton: Boolean(applyButton),
@@ -62,13 +57,8 @@ function classifySignals(signals) {
     const looksLikeApplication = (signals.hasForm && (signals.hasApplySignal || signals.hasApplyButton)) && !signals.hasPasswordInput;
     if (looksLikeApplication)
         return 'application-ready';
-    if (looksLikeAuth) {
-        if (!signals.hasPasswordInput && signals.hasOauthButton)
-            return 'manual-auth-required';
+    if (looksLikeAuth)
         return 'auth-required';
-    }
-    if (signals.hasOauthButton && !signals.hasApplySignal)
-        return 'manual-auth-required';
     return 'application-ready';
 }
 async function fillLoginForm(page, credentials, candidateSubmitSelector) {
@@ -129,9 +119,6 @@ async function runAuthPreflight(page, profile) {
     if (initialState === 'application-ready') {
         return { state: 'application-ready', reason: 'application-form-detected', pageUrl: page.url() };
     }
-    if (initialState === 'manual-auth-required') {
-        return { state: 'manual-auth-required', reason: 'oauth-or-manual-auth-required', pageUrl: page.url() };
-    }
     if (initialState !== 'auth-required') {
         return { state: 'application-ready', reason: 'no-auth-signals', pageUrl: page.url() };
     }
@@ -151,10 +138,7 @@ async function runAuthPreflight(page, profile) {
         if (finalState === 'application-ready') {
             return { state: 'auth-handled', reason: 'login-submitted-and-application-visible', pageUrl: page.url() };
         }
-        if (finalState === 'manual-auth-required') {
-            return { state: 'manual-auth-required', reason: 'manual-auth-step-after-login', pageUrl: page.url() };
-        }
-        return { state: 'auth-failed', reason: 'auth-submitted-but-application-not-visible', pageUrl: page.url() };
+        return { state: 'demote-to-assisted', reason: 'auth-submitted-but-application-not-visible', pageUrl: page.url() };
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);

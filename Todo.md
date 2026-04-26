@@ -1,5 +1,7 @@
-# TODO
-
-1. The Toggle switch for dark and white mode isnt working.
-2. The White background looks and even some buttons arent working. If Cannot be white just give a theme ( yellowish, Greyish etc.). Also test if that working perfectly. Cause the white background isnt working for buttons like "ATS Score" and without the borders it looks very weird and hard to navigate.
-3.Remove the Linkedin/Indeed button. As I dont think that even doing anything, remove the Linkedin/Indeed button ( also the codebase behind it.)
+ What role it will exaclty apply to automatically? If the jobs are vague or not a tech       
+  related then what? Should I give all my experience and projects details in like a latex     
+  format for the system to detect and change the resume accordingly to pass the ATS? Also if I  
+  give my resume also the AI will do minimal changes, should I give a draft for                 
+  AI_engineering_resume, Software_engineering_resume, ML_Engineering_resume_draft. Do you       
+  understand what I am staying. Also I have been working on other project that linked to this   
+  project where I manually accept edits so that to match the ATS Score. Can we   

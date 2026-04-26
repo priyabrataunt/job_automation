@@ -329,10 +329,13 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
       let fillResults: FillResult[] = [];
       let adapterName = 'unknown';
       try {
+        console.log(`\n  [Engine] Detecting platform adapter...`);
         const adapter = await detectAdapter(page);
         adapterName = adapter.name;
+        console.log(`  [Engine] Detected adapter: ${adapterName}`);
 
         // Fill current page/step
+        console.log(`  [Engine] Scanning for form fields (Step 1)...`);
         fillResults = await adapter.fillForm(page, formEngine, job);
 
         // Handle multi-step forms (up to 5 steps)
@@ -340,6 +343,7 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
         for (let step = 1; step < MAX_STEPS; step++) {
           const advanced = await adapter.handleMultiStep(page);
           if (!advanced) break;
+          console.log(`  [Engine] Advanced to Step ${step + 1}. Scanning for form fields...`);
           const stepResults = await adapter.fillForm(page, formEngine, job);
           fillResults = fillResults.concat(stepResults);
         }
@@ -347,6 +351,7 @@ export async function run(config: EngineConfig = DEFAULT_CONFIG): Promise<void> 
         // Upload resume if profile has one
         if (profile.resume_path) {
           try {
+            console.log(`  [Engine] Uploading resume from ${profile.resume_path}...`);
             await adapter.uploadResume(page, profile.resume_path);
           } catch (resumeErr: any) {
             console.warn(`[Engine] Resume upload warning: ${resumeErr.message ?? resumeErr}`);

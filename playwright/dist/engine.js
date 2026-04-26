@@ -86,7 +86,7 @@ function loadProfile(profilePath) {
     return JSON.parse(fs.readFileSync(resolved, 'utf-8'));
 }
 async function fetchQueue(apiBase) {
-    const res = await fetch(`${apiBase}/api/jobs/queue`);
+    const res = await fetch(`${apiBase}/api/jobs/queue?mode=bulk`);
     if (!res.ok)
         throw new Error(`Failed to load queue (${res.status}): ${res.statusText}`);
     const data = (await res.json());
@@ -175,6 +175,35 @@ function appendRunEvent(event) {
         // Monitoring must never block the engine
     }
 }
+async function hasCaptcha(page) {
+    try {
+        return await page.evaluate(() => {
+            const title = document.title.toLowerCase();
+            if (title.includes('just a moment') || title.includes('attention required'))
+                return true;
+            const iframes = Array.from(document.querySelectorAll('iframe'));
+            return iframes.some(f => {
+                const src = f.getAttribute('src') ?? '';
+                return src.includes('recaptcha') || src.includes('hcaptcha') || src.includes('turnstile');
+            });
+        });
+    }
+    catch {
+        return false;
+    }
+}
+async function demoteToAssisted(apiBase, jobId, reason) {
+    try {
+        await fetch(`${apiBase}/api/jobs/${jobId}/queue-mode`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'assisted', mode_reason: `auto-demote: ${reason}` }),
+        });
+    }
+    catch {
+        // Best-effort — job stays in queue to be picked up by extension
+    }
+}
 async function ensureApplicationReady(page, profile, job) {
     let latest = {
         state: 'application-ready',
@@ -198,15 +227,8 @@ async function ensureApplicationReady(page, profile, job) {
             }
             return { decision: 'ready', authResult: latest };
         }
-        if (latest.state === 'manual-auth-required') {
-            ui.printAuthStatus(`Manual auth required (${latest.reason}).`);
-            ui.printAuthPrompt();
-            const action = await ui.waitForUserAction();
-            if (action === 'quit')
-                return { decision: 'quit', authResult: latest };
-            if (action === 'skip')
-                return { decision: 'skip', authResult: latest };
-            continue;
+        if (latest.state === 'demote-to-assisted') {
+            return { decision: 'demote', authResult: latest };
         }
         if (attempt < AUTH_MAX_ATTEMPTS) {
             ui.printAuthStatus(`Auth attempt ${attempt} failed (${latest.reason}). Retrying once...`);
@@ -272,10 +294,23 @@ async function run(config = DEFAULT_CONFIG) {
                 results.push({ jobId: job.id, title: job.title, company: job.company, status: 'error', error: msg });
                 continue;
             }
+            // Check for captcha/Cloudflare after navigation
+            if (await hasCaptcha(page)) {
+                await demoteToAssisted(config.apiBase, job.id, 'captcha');
+                ui.printAuthStatus(`Captcha detected — demoted to assisted (${job.title})`);
+                results.push({ jobId: job.id, title: job.title, company: job.company, status: 'skipped', skipReason: 'auto-demote: captcha' });
+                continue;
+            }
             const authGate = await ensureApplicationReady(page, profile, job);
             if (authGate.decision === 'quit') {
                 console.log('\n[Engine] Quitting — remaining jobs stay queued.');
                 break;
+            }
+            if (authGate.decision === 'demote') {
+                await demoteToAssisted(config.apiBase, job.id, authGate.authResult.reason);
+                ui.printAuthStatus(`Auth wall detected — demoted to assisted (${job.title})`);
+                results.push({ jobId: job.id, title: job.title, company: job.company, status: 'skipped', skipReason: `auto-demote: ${authGate.authResult.reason}` });
+                continue;
             }
             if (authGate.decision === 'skip') {
                 ui.printSkipped(job);
@@ -300,9 +335,12 @@ async function run(config = DEFAULT_CONFIG) {
             let fillResults = [];
             let adapterName = 'unknown';
             try {
+                console.log(`\n  [Engine] Detecting platform adapter...`);
                 const adapter = await (0, index_1.detectAdapter)(page);
                 adapterName = adapter.name;
+                console.log(`  [Engine] Detected adapter: ${adapterName}`);
                 // Fill current page/step
+                console.log(`  [Engine] Scanning for form fields (Step 1)...`);
                 fillResults = await adapter.fillForm(page, formEngine, job);
                 // Handle multi-step forms (up to 5 steps)
                 const MAX_STEPS = 5;
@@ -310,12 +348,14 @@ async function run(config = DEFAULT_CONFIG) {
                     const advanced = await adapter.handleMultiStep(page);
                     if (!advanced)
                         break;
+                    console.log(`  [Engine] Advanced to Step ${step + 1}. Scanning for form fields...`);
                     const stepResults = await adapter.fillForm(page, formEngine, job);
                     fillResults = fillResults.concat(stepResults);
                 }
                 // Upload resume if profile has one
                 if (profile.resume_path) {
                     try {
+                        console.log(`  [Engine] Uploading resume from ${profile.resume_path}...`);
                         await adapter.uploadResume(page, profile.resume_path);
                     }
                     catch (resumeErr) {

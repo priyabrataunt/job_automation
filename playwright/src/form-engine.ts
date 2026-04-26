@@ -16,18 +16,22 @@ export class FormEngine {
 
   /** Resolve a batch of fields, returning one FillResult per field. */
   async resolveFields(fields: FormField[], jobDescription?: string): Promise<FillResult[]> {
+    console.log(`  [Engine] Detected ${fields.length} form field(s). Resolving values...`);
     const results: FillResult[] = [];
     const unresolved: FormField[] = [];
 
     for (const field of fields) {
+      console.log(`    - Detected field: "${field.label}" (type: ${field.type})`);
       const profileValue = this.resolveFromProfile(field.label);
       if (profileValue !== null) {
+        console.log(`      → Resolved from profile`);
         results.push({ label: field.label, value: profileValue, source: 'profile' });
         continue;
       }
 
       const cacheValue = await this.resolveFromCache(field.label);
       if (cacheValue !== null) {
+        console.log(`      → Resolved from cache`);
         results.push({ label: field.label, value: cacheValue, source: 'cache' });
         continue;
       }
@@ -37,9 +41,15 @@ export class FormEngine {
 
     // Batch AI call for all unresolved fields
     if (unresolved.length > 0) {
+      console.log(`  [Engine] Requesting AI resolution for ${unresolved.length} field(s)...`);
       const aiAnswers = await this.resolveWithAI(unresolved, jobDescription);
       for (const field of unresolved) {
         const value = aiAnswers[field.label] ?? '';
+        if (value) {
+          console.log(`    - "${field.label}" → Resolved by AI`);
+        } else {
+          console.log(`    - "${field.label}" → Unfilled`);
+        }
         results.push({ label: field.label, value, source: value ? 'ai' : 'unfilled' });
         // Save AI answers to cache for reuse in future applications
         if (value) {

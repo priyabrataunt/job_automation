@@ -1,0 +1,38 @@
+{
+  "_comment": "Fill in your details here. This file is read by the extension for auto-fill.",
+  "job_tracker_url": "http://localhost:8000",
+  "personal": {
+    "name": "Priyabrata Behera",
+    "email": "pbehera.tech@gmail.com",
+    "phone": "630-534-0344",
+    "address": {
+      "city": "Denton",
+      "state": "TX",
+      "zip": "76201",
+      "country": "United States"
+    },
+    "linkedin": "https://www.linkedin.com/in/beherapriyabrata/",
+    "github": "https://github.com/priyabrataunt",
+    "portfolio": "NA"
+  },
+  "visa": {
+    "status": "F1-OPT",
+    "authorized": true,
+    "sponsorship_required": false,
+    "graduation_date": "2026-05",
+    "opt_expiry": "2027-05"
+  },
+  "work_auth_answers": {
+    "authorized_to_work": "Yes",
+    "require_sponsorship_now": "No",
+    "require_sponsorship_future": "No"
+  },
+  "answers": {
+    "salary_expectation": "90000",
+    "years_experience": "2",
+    "notice_period": "2 weeks",
+    "highest_education": "Master's Degree",
+    "degree_field": "Computer Science",
+    "pronouns": "He/Him"
+  }
+}
