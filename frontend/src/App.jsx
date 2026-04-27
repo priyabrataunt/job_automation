@@ -149,6 +149,38 @@ function SponsorTierBadge({ tier }) {
   )
 }
 
+function H1bProbabilityBadge({ probability, count }) {
+  if (!probability || probability === 'None') return null
+  const config = {
+    High:   { bg: 'var(--bg-green)',  fg: 'var(--fg-green)',  border: '#40a02b' },
+    Medium: { bg: 'var(--bg-blue)',   fg: 'var(--fg-blue)',   border: '#1e66f5' },
+    Low:    { bg: 'var(--bg-yellow)', fg: 'var(--fg-yellow)', border: '#df8e1d' },
+  }
+  const c = config[probability] || config.Low
+  const tip = count != null ? `~${count.toLocaleString()} LCAs/yr` : 'historical sponsor'
+  return (
+    <span title={tip} style={{ background: c.bg, color: c.fg, fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700, border: `1px solid ${c.border}` }}>
+      H1B: {probability}
+    </span>
+  )
+}
+
+const ARCHETYPE_LABELS = {
+  frontend: 'Frontend', backend: 'Backend', fullstack: 'Fullstack', mobile: 'Mobile',
+  devops: 'DevOps', data: 'Data', ml: 'ML/AI', security: 'Security', qa: 'QA',
+  pm: 'PM', design: 'Design', embedded: 'Embedded', other: 'Other',
+}
+function ArchetypeBadge({ archetype }) {
+  if (!archetype) return null
+  return (
+    <span style={{
+      background: 'var(--bg-surface-alt)', color: 'var(--text-secondary)',
+      fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600,
+      border: '1px solid var(--border-subtle)',
+    }}>{ARCHETYPE_LABELS[archetype] || archetype}</span>
+  )
+}
+
 function ScoreBar({ score }) {
   const maxScore = 100
   const pct = Math.min(100, Math.round((score / maxScore) * 100))
@@ -273,7 +305,7 @@ function ScoreTooltip({ details, children }) {
   )
 }
 
-function JobCard({ job, onStatusChange, onOptimize, onQueue }) {
+function JobCard({ job, onStatusChange, onOptimize, onQueue, onOutreach }) {
   let fullDescription = job.description || job.description_snippet || ''
   if (job.raw_json) {
     try {
@@ -329,6 +361,8 @@ function JobCard({ job, onStatusChange, onOptimize, onQueue }) {
         <EasyApplyBadge source={job.ats_source} />
         <OptFriendlyBadge optFriendly={job.opt_friendly} />
         <SponsorTierBadge tier={job.sponsor_tier} />
+        <H1bProbabilityBadge probability={job.h1b_probability} count={job.h1b_lca_count} />
+        <ArchetypeBadge archetype={job.archetype} />
         <VisaBadge signal={job.visa_signal} />
         {job.remote ? (
           <span style={{ background: 'var(--bg-teal)', color: 'var(--fg-blue)', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>Remote</span>
@@ -421,6 +455,22 @@ function JobCard({ job, onStatusChange, onOptimize, onQueue }) {
               cursor: job.status === 'queued' ? 'default' : 'pointer',
             }}
           >{job.status === 'queued' ? '✓ Queued' : '🚀 Queue'}</button>
+        )}
+        {onOutreach && (
+          <button
+            onClick={() => onOutreach(job)}
+            style={{
+              background: 'var(--bg-surface-alt)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              padding: '4px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+            title="Generate cold outreach message for this job"
+          >📨 Outreach</button>
         )}
       </div>
     </div>
@@ -1060,6 +1110,7 @@ function TabBar({ tab, setTab, followUpCount, queueCount }) {
     { id: 'applied', label: '✅ Applied' },
     { id: 'followup', label: followUpCount > 0 ? `⏰ Follow-up (${followUpCount})` : '⏰ Follow-up' },
     { id: 'analytics', label: '📊 Analytics' },
+    { id: 'storybank', label: '📚 Story Bank' },
     { id: 'history', label: '📁 History' },
     { id: 'prefs', label: '⚙️ Settings' },
   ]
@@ -1185,7 +1236,294 @@ function FollowUpMessageModal({ job, onClose }) {
   )
 }
 
-function FollowUpView({ onStatusChange, onOptimize }) {
+// ── Cold Outreach Modal ────────────────────────────────────────────────────
+function OutreachModal({ job, onClose }) {
+  const [hiringManager, setHiringManager] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+
+  async function generate() {
+    if (!hiringManager.trim()) {
+      setError('Please enter a hiring manager name')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/api/outreach`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: job.id, hiringManagerName: hiringManager.trim() }),
+      })
+      const data = await res.json()
+      if (res.ok && data.message) {
+        setMessage(data.message)
+      } else {
+        setError(data.error || 'Failed to generate message')
+      }
+    } catch {
+      setError('Network error')
+    }
+    setLoading(false)
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
+        padding: 24, width: 560, maxWidth: '95vw',
+      }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ color: 'var(--text-primary)', margin: '0 0 4px', fontSize: 16 }}>📨 Cold Outreach Message</h3>
+        <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 }}>
+          {job.title} at {job.company}
+        </div>
+
+        <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+          Hiring Manager Name
+        </label>
+        <input
+          autoFocus
+          value={hiringManager}
+          onChange={e => setHiringManager(e.target.value)}
+          placeholder="e.g. Jane Smith"
+          onKeyDown={e => { if (e.key === 'Enter' && !loading) generate() }}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: 'var(--bg-surface-alt)', border: '1px solid var(--border-subtle)',
+            borderRadius: 6, padding: '8px 12px', color: 'var(--text-primary)', fontSize: 13,
+            marginBottom: 12,
+          }}
+        />
+
+        {error && <div style={{ color: 'var(--fg-red)', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+
+        {!message && (
+          <button
+            onClick={generate}
+            disabled={loading}
+            style={{
+              background: '#1e66f5', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '8px 18px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: 13, opacity: loading ? 0.6 : 1,
+            }}
+          >{loading ? 'Generating…' : '✨ Generate Message'}</button>
+        )}
+
+        {message && (
+          <>
+            <textarea
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              rows={8}
+              style={{
+                width: '100%', background: 'var(--bg-surface-alt)', border: '1px solid var(--border-subtle)',
+                borderRadius: 8, padding: '10px 14px', color: 'var(--text-primary)', fontSize: 13,
+                lineHeight: 1.6, resize: 'vertical', boxSizing: 'border-box', marginBottom: 12,
+              }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setMessage(''); }} style={{
+                background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none',
+                borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13,
+              }}>Regenerate</button>
+              <button onClick={onClose} style={{
+                background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none',
+                borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13,
+              }}>Close</button>
+              <button onClick={handleCopy} style={{
+                background: copied ? 'var(--bg-green)' : '#1e66f5', color: copied ? 'var(--fg-green)' : '#fff',
+                border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 600,
+                cursor: 'pointer', fontSize: 13,
+              }}>{copied ? 'Copied!' : 'Copy to Clipboard'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Story Bank ─────────────────────────────────────────────────────────────
+const STORY_ARCHETYPES = ['frontend', 'backend', 'fullstack', 'mobile', 'devops', 'data', 'ml', 'security', 'qa', 'pm', 'design', 'embedded', 'other']
+
+function StoryBankView() {
+  const [stories, setStories] = useState([])
+  const [filterArchetype, setFilterArchetype] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [draft, setDraft] = useState({
+    title: '', archetype: 'backend',
+    situation: '', task: '', action: '', result: '', reflection: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    const params = new URLSearchParams()
+    if (filterArchetype) params.set('archetype', filterArchetype)
+    const res = await fetch(`${API}/api/storybank?${params}`)
+    const data = await res.json()
+    setStories(Array.isArray(data) ? data : [])
+  }, [filterArchetype])
+
+  useEffect(() => {
+    async function loadStories() { await load() }
+    loadStories()
+  }, [load])
+
+  async function save() {
+    if (!draft.title.trim()) { setError('Title is required'); return }
+    setError('')
+    setSaving(true)
+    try {
+      const res = await fetch(`${API}/api/storybank`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error || 'Save failed')
+      } else {
+        setShowForm(false)
+        setDraft({ title: '', archetype: 'backend', situation: '', task: '', action: '', result: '', reflection: '' })
+        load()
+      }
+    } catch {
+      setError('Network error')
+    }
+    setSaving(false)
+  }
+
+  async function remove(id) {
+    if (!window.confirm('Delete this story?')) return
+    await fetch(`${API}/api/storybank/${id}`, { method: 'DELETE' })
+    load()
+  }
+
+  const labelStyle = { display: 'block', color: 'var(--text-secondary)', fontSize: 12, marginTop: 10, marginBottom: 4 }
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', background: 'var(--bg-surface-alt)',
+    border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '7px 12px',
+    color: 'var(--text-primary)', fontSize: 13,
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>📚 Story Bank</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select
+            value={filterArchetype}
+            onChange={e => setFilterArchetype(e.target.value)}
+            style={{ ...inputStyle, width: 160 }}
+          >
+            <option value="">All Archetypes</option>
+            {STORY_ARCHETYPES.map(a => <option key={a} value={a}>{ARCHETYPE_LABELS[a] || a}</option>)}
+          </select>
+          <button
+            onClick={() => setShowForm(v => !v)}
+            style={{
+              background: '#1e66f5', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 13,
+            }}
+          >{showForm ? 'Cancel' : '+ Add Story'}</button>
+        </div>
+      </div>
+
+      <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 }}>
+        Track interview stories using the STAR method, tagged by job archetype. Use these to prep targeted bullets when you apply to jobs of that type.
+      </div>
+
+      {showForm && (
+        <div style={{
+          background: 'var(--bg-surface)', border: '1px solid var(--border)',
+          borderRadius: 10, padding: 16, marginBottom: 20,
+        }}>
+          <label style={labelStyle}>Title</label>
+          <input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Migrated billing service to async pipeline" style={inputStyle} />
+
+          <label style={labelStyle}>Archetype</label>
+          <select value={draft.archetype} onChange={e => setDraft({ ...draft, archetype: e.target.value })} style={inputStyle}>
+            {STORY_ARCHETYPES.map(a => <option key={a} value={a}>{ARCHETYPE_LABELS[a] || a}</option>)}
+          </select>
+
+          {['situation', 'task', 'action', 'result', 'reflection'].map(field => (
+            <div key={field}>
+              <label style={labelStyle}>{field[0].toUpperCase() + field.slice(1)}</label>
+              <textarea
+                value={draft[field]}
+                onChange={e => setDraft({ ...draft, [field]: e.target.value })}
+                rows={field === 'action' ? 4 : 2}
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+              />
+            </div>
+          ))}
+
+          {error && <div style={{ color: 'var(--fg-red)', fontSize: 12, marginTop: 8 }}>{error}</div>}
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button
+              onClick={save}
+              disabled={saving}
+              style={{
+                background: '#40a02b', color: '#fff', border: 'none', borderRadius: 8,
+                padding: '8px 18px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontSize: 13,
+                opacity: saving ? 0.6 : 1,
+              }}
+            >{saving ? 'Saving…' : 'Save Story'}</button>
+          </div>
+        </div>
+      )}
+
+      {stories.length === 0 ? (
+        <div style={{ color: 'var(--text-empty)', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>
+          No stories yet. Click "+ Add Story" to capture your first STAR-method interview answer.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {stories.map(s => (
+            <div key={s.id} style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border)',
+              borderRadius: 10, padding: '14px 18px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 14 }}>{s.title}</span>
+                  <ArchetypeBadge archetype={s.archetype} />
+                </div>
+                <button onClick={() => remove(s.id)} style={{
+                  background: 'transparent', color: 'var(--text-muted)', border: 'none',
+                  cursor: 'pointer', fontSize: 12,
+                }}>Delete</button>
+              </div>
+              {['situation', 'task', 'action', 'result', 'reflection'].map(f => s[f] ? (
+                <div key={f} style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', fontSize: 10 }}>{f}: </span>
+                  {s[f]}
+                </div>
+              ) : null)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FollowUpView({ onStatusChange, onOptimize, onOutreach }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState(5)
@@ -1244,7 +1582,7 @@ function FollowUpView({ onStatusChange, onOptimize }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {jobs.map(job => (
             <div key={job.id} style={{ position: 'relative' }}>
-              <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} />
+              <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onOutreach={onOutreach} />
               <button
                 onClick={() => setDraftJob(job)}
                 style={{
@@ -1270,7 +1608,7 @@ const STATUS_META = {
   rejected:    { label: 'Rejected',     color: 'var(--fg-red)', bg: 'var(--bg-red)' },
 }
 
-function HistoryView({ onStatusChange, onOptimize }) {
+function HistoryView({ onStatusChange, onOptimize, onOutreach }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -1340,7 +1678,7 @@ function HistoryView({ onStatusChange, onOptimize }) {
                   background: meta.bg, color: meta.color,
                   fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 99,
                 }}>{meta.label}</div>
-                <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} />
+                <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onOutreach={onOutreach} />
               </div>
             )
           })}
@@ -1351,7 +1689,7 @@ function HistoryView({ onStatusChange, onOptimize }) {
 }
 
 // ── Digest View ────────────────────────────────────────────────────────────
-function DigestView({ onStatusChange, onOptimize, onQueue }) {
+function DigestView({ onStatusChange, onOptimize, onQueue, onOutreach }) {
   const [jobs, setJobs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -1394,7 +1732,7 @@ function DigestView({ onStatusChange, onOptimize, onQueue }) {
             No jobs in the last 24h. Run a collection first!
           </div>
         ) : jobs.map(job => (
-          <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onQueue={onQueue} />
+          <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onQueue={onQueue} onOutreach={onOutreach} />
         ))}
       </div>
     </div>
@@ -1823,6 +2161,7 @@ export default function App() {
   const [offset, setOffset] = useState(0)
   const [prefs, setPrefs] = useState({ keywords: [], company_allowlist: [], company_blocklist: [] })
   const [optimizeJob, setOptimizeJob] = useState(null)
+  const [outreachJob, setOutreachJob] = useState(null)
   const [resumeInfo, setResumeInfo] = useState(null) // { filename, uploadedAt }
   const [scoring, setScoring] = useState(false)
   const [scoreMsg, setScoreMsg] = useState('')
@@ -1902,7 +2241,7 @@ export default function App() {
   }, [fetchPrefs, fetchResume, fetchFollowUpCount, fetchQueueCount])
 
   useEffect(() => {
-    if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue') return
+    if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue' || tab === 'storybank' || tab === 'analytics') return
     const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
     const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', entry_only: '' } : filters
     fetchJobs(activeFilters, offset, statusOverride)
@@ -2105,7 +2444,7 @@ export default function App() {
 
         {/* Digest Tab */}
         {tab === 'digest' && (
-          <DigestView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} />
+          <DigestView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} onOutreach={setOutreachJob} />
         )}
 
         {/* Queue Tab */}
@@ -2115,7 +2454,7 @@ export default function App() {
 
         {/* Follow-up Tab */}
         {tab === 'followup' && (
-          <FollowUpView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} />
+          <FollowUpView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onOutreach={setOutreachJob} />
         )}
 
         {/* Analytics Tab */}
@@ -2123,9 +2462,14 @@ export default function App() {
           <AnalyticsView />
         )}
 
+        {/* Story Bank Tab */}
+        {tab === 'storybank' && (
+          <StoryBankView />
+        )}
+
         {/* History Tab */}
         {tab === 'history' && (
-          <HistoryView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} />
+          <HistoryView onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onOutreach={setOutreachJob} />
         )}
 
         {/* Settings Tab */}
@@ -2300,7 +2644,7 @@ export default function App() {
                    'No jobs found. Click "Collect Now" to start fetching jobs.'}
                 </div>
               ) : jobs.map(job => (
-                <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} />
+                <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} onOutreach={setOutreachJob} />
               ))}
             </div>
           </>
@@ -2315,6 +2659,11 @@ export default function App() {
       {/* Resume Optimizer Modal */}
       {optimizeJob && (
         <ResumeOptimizer job={optimizeJob} onClose={() => setOptimizeJob(null)} />
+      )}
+
+      {/* Cold Outreach Modal */}
+      {outreachJob && (
+        <OutreachModal job={outreachJob} onClose={() => setOutreachJob(null)} />
       )}
 
       {/* Add Job Manually Modal */}

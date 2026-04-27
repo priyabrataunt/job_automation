@@ -18,6 +18,8 @@ export interface Job {
   relevance_score?: number;
   mode?: string;           // 'bulk' | 'assisted'
   mode_reason?: string;    // set on auto-demote
+  archetype?: string;      // 'frontend' | 'backend' | 'data' | 'ml' | etc.
+  visa_clauses?: string;   // JSON: deep visa-clause analysis from OpenAI
 }
 
 export interface Company {
@@ -50,4 +52,16 @@ export interface PushSubscription {
   keys_p256dh: string;
   keys_auth: string;
   created_at: string;
+}
+
+export interface StoryBank {
+  id?: number;
+  title: string;
+  archetype: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  reflection: string;
+  created_at?: string;
 }

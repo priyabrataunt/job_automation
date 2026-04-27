@@ -51,6 +51,19 @@ export function scoreJob(
     }
   }
 
+  // Anti-sponsorship parsing (Visa Policy Parsing - deep mode)
+  const antiSponsorPhrases = [
+    'u.s. citizen', 'us citizen', 'no sponsorship', 'will not sponsor',
+    'not able to sponsor', 'green card required', 'tn visa only',
+    'cannot provide sponsorship', 'unauthorized to work'
+  ];
+  for (const phrase of antiSponsorPhrases) {
+    if (descLower.includes(phrase) || titleLower.includes(phrase)) {
+      score -= 50;
+      break; // Penalize heavily for anti-sponsorship language
+    }
+  }
+
   return Math.max(0, score);
 }
 

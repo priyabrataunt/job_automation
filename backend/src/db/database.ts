@@ -76,8 +76,21 @@ async function execute(sql: string, params: any[] = []): Promise<{ rows: any[]; 
 }
 
 const db = {
-  async exec(sql: string): Promise<void> {
-    await pool.query(normalizeSql(sql));
+  async exec(sql: string, retries = 3): Promise<void> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await pool.query(normalizeSql(sql));
+        return;
+      } catch (err: any) {
+        if (i === retries - 1) throw err;
+        if (err.message.includes('tuple concurrently updated')) {
+          console.warn(`[DB] exec collision, retrying (${i + 1}/${retries})...`);
+          await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
   },
 
   /**
@@ -311,9 +324,13 @@ export async function initDb(): Promise<void> {
       visa_signal INTEGER DEFAULT NULL,
       opt_friendly INTEGER DEFAULT 0,
       sponsor_tier TEXT DEFAULT NULL,
+      h1b_probability TEXT DEFAULT NULL,
+      h1b_lca_count INTEGER DEFAULT NULL,
       queue_position INTEGER DEFAULT NULL,
       mode TEXT DEFAULT 'bulk',
       mode_reason TEXT DEFAULT NULL,
+      archetype TEXT DEFAULT NULL,
+      visa_clauses TEXT DEFAULT NULL,
       UNIQUE(external_id, ats_source)
     );
 
@@ -538,8 +555,20 @@ export async function initDb(): Promise<void> {
   try {
     await db.exec("ALTER TABLE jobs ADD COLUMN mode_reason TEXT DEFAULT NULL");
   } catch { /* column already exists */ }
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN h1b_probability TEXT DEFAULT NULL");
+  } catch { /* column already exists */ }
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN h1b_lca_count INTEGER DEFAULT NULL");
+  } catch { /* column already exists */ }
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN archetype TEXT DEFAULT NULL");
+  } catch { /* column already exists */ }
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN visa_clauses TEXT DEFAULT NULL");
+  } catch { /* column already exists */ }
 
-  console.log('[DB] Neon/Postgres database initialized');
+  console.log('[DB] Database initialized');
 }
 
 export default db;

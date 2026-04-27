@@ -5,3 +5,8 @@
   AI_engineering_resume, Software_engineering_resume, ML_Engineering_resume_draft. Do you       
   understand what I am staying. Also I have been working on other project that linked to this   
   project where I manually accept edits so that to match the ATS Score. Can we   
+
+
+
+
+  

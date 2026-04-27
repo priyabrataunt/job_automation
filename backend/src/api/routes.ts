@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import db from '../db/database';
-import { runCollection, runJSearchCollection, isCollectionRunning } from '../orchestrator';
+import { runCollection, isCollectionRunning } from '../orchestrator';
 import { getPreferences, rescoreAllJobs } from '../scoring';
 import { scoreResume, recencyMultiplier } from '../resume';
 import { PDFParse } from 'pdf-parse';
@@ -112,7 +112,7 @@ async function buildAiFillPrompt(
     messages.push({ role: 'user', content: prompt });
     const completion = await client.chat.completions.create({
         model,
-        max_completion_tokens: model === 'gpt-5.1' ? 1200 : 800,
+        max_tokens: model === 'gpt-5.1' ? 1200 : 800,
         response_format: { type: 'json_object' },
         messages,
     });
@@ -321,17 +321,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             runCollection(hoursBack).catch(err => console.error('[API] collect error:', err));
         });
         return reply.send({ message: `Collection started (${hoursBack}h back)` });
-    });
-    // POST /api/collect/jsearch — manual-only JSearch (LinkedIn/Indeed/Glassdoor)
-    app.post('/api/collect/jsearch', async (request, reply) => {
-        const { hours = '48' } = request.query as {
-            hours?: string;
-        };
-        const hoursBack = parseInt(hours) || 48;
-        setImmediate(() => {
-            runJSearchCollection(hoursBack).catch(err => console.error('[API] JSearch error:', err));
-        });
-        return reply.send({ message: `JSearch collection started (${hoursBack}h back)` });
     });
     // GET /api/collect/status
     app.get('/api/collect/status', async (_request, reply) => {
@@ -1294,5 +1283,164 @@ Guidelines:
         params.push(numId);
         await db.prepare(`UPDATE application_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...params);
         return reply.send({ ok: true });
+    });
+
+    // POST /api/outreach — Cold Outreach / Referral Generator
+    app.post('/api/outreach', async (request, reply) => {
+        const { jobId, hiringManagerName } = request.body as { jobId: number, hiringManagerName: string };
+        const job = await db.prepare('SELECT title, company, description_snippet FROM jobs WHERE id = ?').get(jobId) as any;
+        if (!job) return reply.code(404).send({ error: 'Job not found' });
+
+        if (!process.env.OPENAI_API_KEY) {
+            return reply.code(400).send({ error: 'OPENAI_API_KEY not configured' });
+        }
+
+        try {
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const prompt = `Write a short, professional LinkedIn cold outreach message to a hiring manager named ${hiringManagerName} at ${job.company} for the "${job.title}" role. Emphasize that I am an international student/professional looking for roles that support OPT/H1B, and express interest in an informational interview. Keep it under 100 words. Job snippet: ${job.description_snippet}`;
+            const completion = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [{ role: 'user', content: prompt }]
+            });
+            return reply.send({ message: completion.choices[0].message.content });
+        } catch (err: any) {
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    // POST /api/storybank — "Job Archetype" & Story Bank Tracking
+    app.post('/api/storybank', async (request, reply) => {
+        const { title, archetype, situation, task, action, result, reflection } = request.body as any;
+        if (!title || !archetype) return reply.code(400).send({ error: 'title and archetype are required' });
+        
+        // Note: In a full implementation, you'd add this table in schema.sql. For now, creating dynamically if missing.
+        await db.exec(`CREATE TABLE IF NOT EXISTS story_bank (
+            id SERIAL PRIMARY KEY, title TEXT, archetype TEXT, 
+            situation TEXT, task TEXT, action TEXT, result TEXT, reflection TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+        )`);
+        
+        const stmt = db.prepare(`INSERT INTO story_bank (title, archetype, situation, task, action, result, reflection) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+        const info = await stmt.run(title, archetype, situation || '', task || '', action || '', result || '', reflection || '');
+        return reply.send({ id: info.lastInsertRowid });
+    });
+
+    // GET /api/storybank — Get stories (optionally filter by archetype)
+    app.get('/api/storybank', async (request, reply) => {
+        const { archetype } = request.query as { archetype?: string };
+        try {
+            const rows = archetype
+                ? await db.prepare('SELECT * FROM story_bank WHERE archetype = ? ORDER BY created_at DESC').all(archetype)
+                : await db.prepare('SELECT * FROM story_bank ORDER BY created_at DESC').all();
+            return reply.send(rows);
+        } catch {
+            return reply.send([]);
+        }
+    });
+
+    // DELETE /api/storybank/:id — Remove a story
+    app.delete('/api/storybank/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const numId = parseInt(id);
+        if (isNaN(numId)) return reply.code(400).send({ error: 'Invalid id' });
+        await db.prepare('DELETE FROM story_bank WHERE id = ?').run(numId);
+        return reply.send({ ok: true });
+    });
+
+    // POST /api/jobs/:id/analyze-visa — Deep visa-clause analysis using OpenAI
+    // Reads the full job description and extracts explicit sponsorship clauses,
+    // citizenship requirements, clearance requirements. Result is cached on the job.
+    app.post('/api/jobs/:id/analyze-visa', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const numId = parseInt(id);
+        if (isNaN(numId)) return reply.code(400).send({ error: 'Invalid id' });
+
+        const job = await db.prepare(
+            'SELECT id, title, company, description_snippet, raw_json, visa_clauses FROM jobs WHERE id = ?'
+        ).get(numId) as any;
+        if (!job) return reply.code(404).send({ error: 'Job not found' });
+
+        // Return cached result if available
+        if (job.visa_clauses) {
+            try {
+                return reply.send({ ...JSON.parse(job.visa_clauses), cached: true });
+            } catch { /* fall through to recompute */ }
+        }
+
+        if (!process.env.OPENAI_API_KEY) {
+            return reply.code(400).send({ error: 'OPENAI_API_KEY not configured' });
+        }
+
+        // Reconstruct full description from raw_json when present
+        let description = job.description_snippet || '';
+        if (job.raw_json) {
+            try {
+                const raw = JSON.parse(job.raw_json);
+                const full = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription;
+                if (typeof full === 'string' && full.length > description.length) {
+                    description = stripHtml(full);
+                }
+            } catch { /* ignore */ }
+        }
+        description = description.slice(0, 8000);
+
+        const prompt = `Analyze the following job description and extract any explicit visa/work-authorization clauses.
+Return strict JSON with this shape:
+{
+  "sponsorship_offered": true | false | null,
+  "sponsorship_denied": true | false | null,
+  "citizenship_required": true | false | null,
+  "clearance_required": true | false | null,
+  "summary": "one-sentence plain-English summary",
+  "evidence": ["short verbatim quote 1", "short verbatim quote 2"]
+}
+
+Rules:
+- "sponsorship_offered": true only if the JD explicitly says they sponsor visas / H1B / OPT.
+- "sponsorship_denied": true if they explicitly say they will NOT sponsor.
+- "citizenship_required": true if it says US Citizen / permanent resident / green card required.
+- "clearance_required": true if it mentions security clearance.
+- Use null when the JD is silent — do not guess.
+- evidence: up to 3 short verbatim quotes (max 25 words each) supporting your answers. Empty array if nothing relevant.
+
+Job: ${job.title} @ ${job.company}
+Description:
+${description}`;
+
+        try {
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const completion = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                response_format: { type: 'json_object' },
+                messages: [{ role: 'user', content: prompt }],
+            });
+            const raw = completion.choices[0]?.message?.content || '{}';
+            const parsed = JSON.parse(raw);
+
+            await db.prepare('UPDATE jobs SET visa_clauses = ? WHERE id = ?').run(JSON.stringify(parsed), numId);
+
+            // Auto-update visa_signal when the analyzer finds a definitive answer
+            if (parsed.sponsorship_denied === true || parsed.citizenship_required === true) {
+                await db.prepare('UPDATE jobs SET visa_signal = 0 WHERE id = ?').run(numId);
+            } else if (parsed.sponsorship_offered === true) {
+                await db.prepare('UPDATE jobs SET visa_signal = 100 WHERE id = ?').run(numId);
+            }
+
+            return reply.send({ ...parsed, cached: false });
+        } catch (err: any) {
+            return reply.code(500).send({ error: err.message });
+        }
+    });
+
+    // POST /api/archetypes/backfill — One-shot backfill of archetype on existing jobs
+    app.post('/api/archetypes/backfill', async (_request, reply) => {
+        const { classifyArchetype } = await import('../data/archetypes');
+        const rows = await db.prepare(
+            'SELECT id, title, description_snippet FROM jobs WHERE archetype IS NULL'
+        ).all() as { id: number; title: string; description_snippet: string }[];
+        const stmt = db.prepare('UPDATE jobs SET archetype = ? WHERE id = ?');
+        for (const row of rows) {
+            await stmt.run(classifyArchetype(row.title, row.description_snippet || ''), row.id);
+        }
+        return reply.send({ ok: true, updated: rows.length });
     });
 }

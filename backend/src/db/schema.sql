@@ -25,9 +25,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   visa_signal INTEGER DEFAULT NULL,
   opt_friendly INTEGER DEFAULT 0,
   sponsor_tier TEXT DEFAULT NULL,
+  h1b_probability TEXT DEFAULT NULL,
+  h1b_lca_count INTEGER DEFAULT NULL,
   queue_position INTEGER DEFAULT NULL,
   mode TEXT DEFAULT 'bulk',
   mode_reason TEXT DEFAULT NULL,
+  archetype TEXT DEFAULT NULL,
+  visa_clauses TEXT DEFAULT NULL,
   UNIQUE(external_id, ats_source)
 );
 
@@ -105,3 +109,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_ats_source ON jobs(ats_source);
 CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score);
 CREATE INDEX IF NOT EXISTS idx_jobs_queue_position ON jobs(queue_position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
+
+CREATE TABLE IF NOT EXISTS story_bank (
+  id SERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  archetype TEXT NOT NULL,
+  situation TEXT,
+  task TEXT,
+  action TEXT,
+  result TEXT,
+  reflection TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
