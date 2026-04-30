@@ -1,12 +1,71 @@
+// Computer-science role keywords. The filter looks for these as substrings of
+// the title (case-insensitive), so partial phrases like "software engineer"
+// will match "Senior Software Engineer - Backend" etc.
 const TITLE_KEYWORDS = [
-  'software engineer', 'software developer', 'backend engineer', 'backend developer',
-  'frontend engineer', 'frontend developer', 'full stack', 'fullstack', 'full-stack',
-  'ai engineer', 'ml engineer', 'machine learning engineer', 'data engineer',
-  'platform engineer', 'infrastructure engineer', 'devops engineer', 'site reliability',
-  'sre', 'systems engineer', 'embedded engineer', 'firmware engineer',
-  'intern', 'internship', 'co-op', 'coop', 'new grad', 'sde', 'swe',
+  // SWE — generic
+  'software engineer', 'software developer', 'software development engineer',
+  'sde', 'swe',
+  // SWE — by stack
+  'backend engineer', 'backend developer', 'back-end engineer', 'back end engineer',
+  'frontend engineer', 'frontend developer', 'front-end engineer', 'front end engineer',
+  'full stack', 'fullstack', 'full-stack',
+  'mobile engineer', 'mobile developer', 'ios engineer', 'android engineer',
+  'web engineer', 'web developer',
+  'application engineer', 'applications engineer',
+  // AI / ML / Data
+  'ai engineer', 'ml engineer', 'machine learning engineer',
+  'applied scientist', 'research engineer', 'research scientist',
+  'machine learning scientist', 'data scientist',
+  'data engineer', 'analytics engineer', 'mlops',
+  // Platform / Infra / DevOps / SRE
+  'platform engineer', 'infrastructure engineer', 'cloud engineer',
+  'devops engineer', 'site reliability', 'sre',
+  'tooling engineer', 'developer tools', 'developer experience', 'devex',
+  'build engineer', 'release engineer',
+  // Systems / Embedded / Compiler
+  'systems engineer', 'system engineer', 'embedded engineer', 'firmware engineer',
+  'compiler engineer', 'kernel engineer', 'distributed systems',
+  'performance engineer', 'database engineer',
+  // Security / Networking
+  'security engineer', 'security software engineer', 'application security',
+  'product security', 'network engineer',
+  // QA / Test
+  'qa engineer', 'quality engineer', 'test engineer', 'sdet',
+  // New-grad / level signals (intern/coop alone is NOT enough — see below)
+  'new grad', 'new graduate',
   'engineer i', 'engineer ii', 'engineer 1', 'engineer 2', 'associate engineer',
   'junior engineer', 'junior developer', 'entry level engineer',
+];
+
+// Used only when the title contains "intern" / "co-op". A bare "Intern" title
+// is not enough — it also has to mention a CS domain word, otherwise things
+// like "Materials Characterization Intern" or "NDT Technician Co-op" leak in.
+const CS_DOMAIN_KEYWORDS = [
+  'software', 'computer', 'coding', 'programming', 'algorithm',
+  'backend', 'back-end', 'back end', 'frontend', 'front-end', 'front end',
+  'full stack', 'fullstack', 'full-stack',
+  'web', 'mobile', 'ios', 'android',
+  'data', 'analytics', 'machine learning', ' ml ', ' ai ', ' ai/', '/ai',
+  'artificial intelligence', 'deep learning', 'nlp', 'computer vision',
+  'devops', 'sre', 'site reliability', 'platform', 'infrastructure', 'cloud',
+  'systems', 'embedded', 'firmware', 'compiler', 'kernel', 'distributed',
+  'security', 'cyber', 'network engineer', 'database',
+  'qa', 'sdet', 'test automation',
+  'developer', 'engineering', 'engineer',
+  'sde', 'swe', 'tech', 'it ',
+];
+
+// Non-CS roles that frequently slip through because they contain "engineer"
+// or "developer". Reject before TITLE_KEYWORDS evaluation.
+const NON_CS_TITLE_BLOCKLIST = [
+  'sales engineer', 'solutions engineer', 'solution engineer',
+  'customer engineer', 'support engineer', 'field engineer',
+  'forward deployed engineer', 'implementation engineer',
+  'business development', 'developer relations', 'developer advocate',
+  'mechanical engineer', 'electrical engineer', 'hardware engineer',
+  'civil engineer', 'chemical engineer', 'biomedical', 'optical engineer',
+  'manufacturing engineer', 'process engineer', 'industrial engineer',
+  'rf engineer', 'antenna engineer',
 ];
 
 const ENTRY_LEVEL_KEYWORDS = [
@@ -25,8 +84,37 @@ const EXCLUDE_SENIORITY = [
 ];
 
 export function isRelevantTitle(title: string): boolean {
-  const t = title.toLowerCase();
-  return TITLE_KEYWORDS.some(kw => t.includes(kw));
+  const t = ` ${title.toLowerCase()} `;
+  if (NON_CS_TITLE_BLOCKLIST.some(kw => t.includes(kw))) return false;
+  if (TITLE_KEYWORDS.some(kw => t.includes(kw))) return true;
+  // For intern / co-op titles, require an explicit CS-domain keyword.
+  const isIntern = /\bintern(ship)?\b|\bco-?op\b/.test(t);
+  if (isIntern && CS_DOMAIN_KEYWORDS.some(kw => t.includes(kw))) return true;
+  return false;
+}
+
+// Reject postings that require US citizenship or active security clearance.
+// These are not viable for international students on OPT/CPT/H-1B.
+const CITIZENSHIP_PHRASES = [
+  'u.s. citizen', 'us citizen', 'united states citizen', 'american citizen',
+  'must be a us citizen', 'must be a u.s. citizen',
+  'citizenship is required', 'citizenship required',
+  'requires us citizenship', 'requires u.s. citizenship',
+  'sole us citizen', 'sole u.s. citizen',
+  'no sponsorship', 'unable to sponsor', 'will not sponsor', 'do not sponsor',
+  'security clearance required', 'active security clearance',
+  'secret clearance', 'top secret clearance', 'ts/sci', 'ts / sci',
+  'public trust clearance', 'dod clearance', 'doe clearance',
+  'itar', 'export control',
+];
+
+export function requiresUsCitizenship(...texts: (string | undefined | null)[]): boolean {
+  const blob = texts
+    .filter((s): s is string => typeof s === 'string' && s.length > 0)
+    .join('  ')
+    .toLowerCase()
+    .replace(/<[^>]+>/g, ' ');
+  return CITIZENSHIP_PHRASES.some(p => blob.includes(p));
 }
 
 export function isEntryLevel(title: string, description: string): boolean {
@@ -135,6 +223,7 @@ export function filterJob(
   if (!isRelevantTitle(title)) return null;
   if (!isEntryLevel(title, description)) return null;
   if (!isUSOrRemote(location)) return null;
+  if (requiresUsCitizenship(title, description)) return null;
 
   return {
     job_type: detectJobType(title),

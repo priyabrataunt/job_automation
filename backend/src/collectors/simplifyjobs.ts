@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { filterJob, isUSOrRemote } from './filters';
+import { filterJob, requiresUsCitizenship } from './filters';
 import { Job } from '../db/schema';
 
 // SimplifyJobs curated listings from GitHub
@@ -48,20 +48,30 @@ function normalizeSimplifyJob(
   // Combine all locations into one string for filtering
   const location = (listing.locations || []).join(', ');
 
-  const filter = filterJob(title, location, '');
-
-  // SimplifyJobs entries are already curated for entry-level/intern roles,
-  // so allow them even if our title filter is too strict.
-  const jobType = filter?.job_type ?? defaultJobType;
-  const experienceLevel = filter?.experience_level ?? (defaultJobType === 'internship' ? 'internship' : 'entry');
-  const remote = filter?.remote ?? /remote/i.test(location);
-
-  // Still skip non-US locations (our filter handles this)
-  if (filter === null) {
-    // If filterJob rejected it, check if it was only because of title keywords.
-    // SimplifyJobs data is pre-curated, so we relax the title check but keep location filter.
-    if (!isUSOrRemote(location)) return null;
+  // Reject postings that explicitly require US citizenship / clearance, or
+  // call out no-sponsorship. SimplifyJobs surfaces this via the `sponsorship`
+  // field (e.g. "U.S. Citizenship is Required").
+  const sponsorship = (listing.sponsorship || '').toLowerCase();
+  if (
+    sponsorship.includes('citizen') ||
+    sponsorship.includes('clearance') ||
+    sponsorship.includes('does not offer sponsorship') ||
+    sponsorship.includes('no sponsorship')
+  ) {
+    return null;
   }
+  if (requiresUsCitizenship(title, listing.terms?.join(' '))) return null;
+
+  // Use the same CS / entry-level / location filter as every other collector.
+  // SimplifyJobs is curated for new-grad/intern roles, but it includes plenty
+  // of non-CS postings (mech-eng interns, NDT technicians, etc.), so we no
+  // longer relax the title check here.
+  const filter = filterJob(title, location, '');
+  if (!filter) return null;
+
+  const jobType = filter.job_type;
+  const experienceLevel = filter.experience_level;
+  const remote = filter.remote;
 
   return {
     external_id: `simplify_${listing.id}`,

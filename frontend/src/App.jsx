@@ -2183,7 +2183,7 @@ export default function App() {
     search: '',
     hours: '24',
     sort: '',
-    entry_only: '',
+    junior_only: '',
   })
 
   const fetchJobs = useCallback(async (currentFilters, currentOffset, statusOverride) => {
@@ -2243,7 +2243,7 @@ export default function App() {
   useEffect(() => {
     if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue' || tab === 'storybank' || tab === 'analytics') return
     const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
-    const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', entry_only: '' } : filters
+    const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', junior_only: '' } : filters
     fetchJobs(activeFilters, offset, statusOverride)
     fetchStats()
   }, [tab, filters, offset, fetchJobs, fetchStats])
@@ -2354,7 +2354,7 @@ export default function App() {
 
   function clearFilters() {
     setOffset(0)
-    setFilters({ status: '', ats_source: '', job_type: '', remote: '', search: '', hours: '24', sort: '', entry_only: '' })
+    setFilters({ status: '', ats_source: '', job_type: '', remote: '', search: '', hours: '24', sort: '', junior_only: '' })
   }
 
   const bs = stats?.by_status || {}
@@ -2558,11 +2558,12 @@ export default function App() {
                 </select>
               ))}
               <button
-                onClick={() => setFilter('entry_only', filters.entry_only === 'true' ? '' : 'true')}
+                onClick={() => setFilter('junior_only', filters.junior_only === 'true' ? '' : 'true')}
+                title="Includes entry-level roles plus jobs requiring up to 3 years of experience"
                 style={{
-                  background: filters.entry_only === 'true' ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
-                  color: filters.entry_only === 'true' ? 'var(--fg-green)' : 'var(--text-muted)',
-                  border: filters.entry_only === 'true' ? '1px solid #40a02b' : '1px solid var(--border)',
+                  background: filters.junior_only === 'true' ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+                  color: filters.junior_only === 'true' ? 'var(--fg-green)' : 'var(--text-muted)',
+                  border: filters.junior_only === 'true' ? '1px solid #40a02b' : '1px solid var(--border)',
                   borderRadius: 6,
                   padding: '6px 12px',
                   fontSize: 12,
@@ -2570,7 +2571,7 @@ export default function App() {
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
-              >🎓 Entry Roles</button>
+              >🎓 Junior Roles</button>
               <select
                 value={filters.sort}
                 onChange={e => setFilter('sort', e.target.value)}

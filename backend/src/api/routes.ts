@@ -143,7 +143,7 @@ async function fetchWorkdayDescription(applyUrl: string): Promise<string> {
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // GET /api/jobs
     app.get('/api/jobs', async (request, reply) => {
-        const { status, ats_source, job_type, remote, search, hours, sort, entry_only, limit = '50', offset = '0', } = request.query as Record<string, string>;
+        const { status, ats_source, job_type, remote, search, hours, sort, entry_only, junior_only, limit = '50', offset = '0', } = request.query as Record<string, string>;
         const conditions: string[] = ['(is_us_job(location) = 1 OR ats_source = \'manual\')'];
         const params: any[] = [];
         if (status) {
@@ -162,8 +162,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             conditions.push('remote = ?');
             params.push(remote === 'true' || remote === '1' ? 1 : 0);
         }
-        if (entry_only === 'true') {
-            conditions.push('((max_experience_years IS NOT NULL AND max_experience_years < 2) OR is_entry_title(title) = 1)');
+        // Junior filter: include all entry-level roles plus jobs requiring up
+        // to 3 years of experience. `entry_only` kept as an alias for backward
+        // compatibility with any saved links.
+        if (junior_only === 'true' || entry_only === 'true') {
+            conditions.push('((max_experience_years IS NOT NULL AND max_experience_years <= 3) OR is_entry_title(title) = 1)');
         }
         if (search) {
             conditions.push('(title LIKE ? OR company LIKE ? OR description_snippet LIKE ?)');

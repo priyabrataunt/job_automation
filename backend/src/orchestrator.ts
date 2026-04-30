@@ -2,31 +2,47 @@ import db from './db/database';
 import { runAllCollectors } from './collectors';
 import { Job } from './db/schema';
 import { scoreNewJobs } from './scoring';
-import { parseExperienceYears } from './collectors/filters';
+import { parseExperienceYears, requiresUsCitizenship } from './collectors/filters';
 import { getSponsorTier } from './data/opt-friendly-companies';
 import { fetchH1bHistoricalData } from './data/h1b-data';
 import { classifyArchetype } from './data/archetypes';
 
 /**
- * Deduplicate jobs across ATS sources by normalized title + company.
- * Prefers original ATS postings over aggregators (simplifyjobs).
+ * Deduplicate jobs across ATS sources by normalized (title, company, location).
+ * Prefers original ATS postings over aggregators (simplifyjobs). Including
+ * location prevents collapsing legitimately distinct postings (e.g. two
+ * "Software Engineer" roles at the same company in NYC vs SF).
  */
+function normalizeForDedup(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    // Strip common parenthetical/bracketed suffixes like "(Remote)", "[US]"
+    .replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')
+    // Strip trailing location/level suffixes after an em/en/hyphen
+    .replace(/\s+[-–—]\s+.*$/, '')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function deduplicateJobs(jobs: Job[]): Job[] {
   const seen = new Map<string, Job>();
   const aggregators = new Set(['simplifyjobs']);
 
   for (const job of jobs) {
-    const key = `${job.title.toLowerCase().trim()}||${job.company.toLowerCase().trim()}`;
+    const key = [
+      normalizeForDedup(job.title),
+      normalizeForDedup(job.company),
+      normalizeForDedup(job.location),
+    ].join('||');
     const existing = seen.get(key);
     if (!existing) {
       seen.set(key, job);
-    } else {
+    } else if (aggregators.has(existing.ats_source) && !aggregators.has(job.ats_source)) {
       // Keep original ATS over aggregator
-      if (aggregators.has(existing.ats_source) && !aggregators.has(job.ats_source)) {
-        seen.set(key, job);
-      }
-      // Otherwise keep the first one (discard this duplicate)
+      seen.set(key, job);
     }
+    // Otherwise keep the first one (discard this duplicate)
   }
   return Array.from(seen.values());
 }
@@ -115,10 +131,14 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
     errors.push(`Scoring error: ${err.message}`);
   }
 
-  // Parse experience-years from descriptions for Entry Roles filtering
+  // Parse experience-years from descriptions for Junior Roles filtering, and
+  // remove postings that require US citizenship / active clearance (often
+  // only mentioned in the full description, not the snippet).
+  let citizenshipRejected = 0;
   try {
     if (newJobIds.length > 0) {
       const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
+      const deleteStmt = db.prepare('DELETE FROM jobs WHERE id = ?');
       const rows = await db.prepare(
         `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
       ).all(...newJobIds) as any[];
@@ -136,6 +156,13 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
           }
         }
 
+        if (requiresUsCitizenship(row.title, desc)) {
+          await deleteStmt.run(row.id);
+          citizenshipRejected++;
+          jobsNew--;
+          continue;
+        }
+
         const years = parseExperienceYears(`${row.title} ${desc}`);
         if (years !== null) {
           await expStmt.run(years, row.id);
@@ -144,6 +171,9 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
     }
   } catch (err: any) {
     errors.push(`Experience parsing error: ${err.message}`);
+  }
+  if (citizenshipRejected > 0) {
+    console.log(`[Orchestrator] Removed ${citizenshipRejected} citizenship/clearance-only postings`);
   }
 
   // Flag OPT-friendly companies and set sponsor tier + H-1B probability for new jobs
