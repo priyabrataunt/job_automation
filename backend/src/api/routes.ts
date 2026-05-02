@@ -140,6 +140,119 @@ async function fetchWorkdayDescription(applyUrl: string): Promise<string> {
         return '';
     }
 }
+async function runWithConcurrency<T>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T) => Promise<void>,
+): Promise<void> {
+    const queue = [...items];
+    const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
+        while (queue.length > 0) {
+            const item = queue.shift();
+            if (item === undefined) return;
+            await worker(item);
+        }
+    });
+    await Promise.all(workers);
+}
+type StoredResumeRow = {
+    id: number;
+    label: string;
+    filename: string;
+    resume_text: string;
+    is_default: boolean;
+    uploaded_at: string;
+};
+function isSupportedResumeFile(file: { mimetype?: string; filename?: string }): boolean {
+    const name = (file.filename || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    if (name.endsWith('.pdf') || name.endsWith('.txt') || name.endsWith('.tex')) return true;
+    if (mime === 'application/pdf' || mime === 'text/plain') return true;
+    if (mime.includes('tex') || mime === 'application/octet-stream') return true;
+    return false;
+}
+async function parseUploadedResumeText(file: any): Promise<string> {
+    const buffer = await file.toBuffer();
+    const name = (file.filename || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+
+    if (name.endsWith('.pdf') || mime === 'application/pdf') {
+        const pdf = new PDFParse({ data: new Uint8Array(buffer) });
+        const result = await pdf.getText();
+        await pdf.destroy();
+        return (result.text || '').trim();
+    }
+
+    return buffer.toString('utf-8').trim();
+}
+async function listStoredResumes(): Promise<StoredResumeRow[]> {
+    let rows = await db.prepare(
+        `SELECT id, label, filename, resume_text, is_default, uploaded_at
+         FROM user_resumes
+         ORDER BY is_default DESC, uploaded_at DESC`
+    ).all() as StoredResumeRow[];
+    if (rows.length > 0) return rows;
+
+    // Backward-compat fallback for instances that still only have user_resume.
+    const legacy = await db.prepare(
+        `SELECT id, filename, resume_text, uploaded_at FROM user_resume WHERE id = 1`
+    ).get() as any;
+    if (legacy?.resume_text) {
+        const inserted = await db.prepare(
+            `INSERT INTO user_resumes (label, filename, resume_text, is_default, uploaded_at)
+             VALUES ('Default', ?, ?, TRUE, COALESCE(?, NOW()))
+             RETURNING id`
+        ).run(
+            legacy.filename || 'resume',
+            legacy.resume_text,
+            legacy.uploaded_at || null,
+        );
+        rows = await db.prepare(
+            `SELECT id, label, filename, resume_text, is_default, uploaded_at
+             FROM user_resumes
+             WHERE id = ?`
+        ).all(inserted.lastInsertRowid) as StoredResumeRow[];
+    }
+    return rows;
+}
+async function getDefaultResume(): Promise<StoredResumeRow | null> {
+    const rows = await listStoredResumes();
+    if (!rows.length) return null;
+    return rows.find((r) => r.is_default) || rows[0];
+}
+async function getResumeForJob(jobId: number, resumeId?: number): Promise<StoredResumeRow | null> {
+    if (resumeId) {
+        const explicit = await db.prepare(
+            `SELECT id, label, filename, resume_text, is_default, uploaded_at
+             FROM user_resumes
+             WHERE id = ?`
+        ).get(resumeId) as StoredResumeRow | undefined;
+        if (explicit) return explicit;
+    }
+
+    const scored = await db.prepare(
+        `SELECT r.id, r.label, r.filename, r.resume_text, r.is_default, r.uploaded_at
+         FROM job_resume_scores s
+         JOIN user_resumes r ON r.id = s.resume_id
+         WHERE s.job_id = ?
+         ORDER BY s.score DESC, r.is_default DESC, r.uploaded_at DESC
+         LIMIT 1`
+    ).get(jobId) as StoredResumeRow | undefined;
+    if (scored) return scored;
+    return getDefaultResume();
+}
+function getFullJobDescription(job: any): string {
+    let description = job.description_snippet || '';
+    if (job.raw_json) {
+        try {
+            const raw = JSON.parse(job.raw_json);
+            description = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || description;
+        }
+        catch { /* use snippet */ }
+    }
+    if (typeof description !== 'string') return '';
+    return description;
+}
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // GET /api/jobs
     app.get('/api/jobs', async (request, reply) => {
@@ -338,6 +451,155 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         const total = (await db.prepare(`SELECT COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 AND posted_at >= ?`).get(cutoff) as any).count;
         return reply.send({ jobs, total });
     });
+    // POST /api/priority-scan — rank top jobs across all resumes
+    app.post('/api/priority-scan', async (request, reply) => {
+        const { hours = '48', limit = '15' } = request.query as Record<string, string>;
+        const hoursBack = Math.max(1, parseInt(hours) || 48);
+        const lim = Math.min(Math.max(1, parseInt(limit) || 15), 50);
+        const resumes = await listStoredResumes();
+        if (!resumes.length) {
+            return reply.code(400).send({ error: 'Upload at least one resume first.' });
+        }
+
+        const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+        const jobs = await db.prepare(
+            `SELECT id, title, company, location, posted_at, status, apply_url, ats_source, description_snippet, raw_json,
+                    opt_friendly, sponsor_tier, visa_signal
+             FROM jobs
+             WHERE is_us_job(location) = 1
+               AND posted_at >= ?
+               AND status IN ('new', 'saved', 'queued')
+             ORDER BY posted_at DESC`
+        ).all(cutoff) as any[];
+
+        const upsertPairStmt = db.prepare(
+            `INSERT INTO job_resume_scores (job_id, resume_id, score, details, scored_at)
+             VALUES (?, ?, ?, ?::jsonb, NOW())
+             ON CONFLICT (job_id, resume_id)
+             DO UPDATE SET score = EXCLUDED.score, details = EXCLUDED.details, scored_at = NOW()`
+        );
+        const scoredByJob = new Map<number, Array<{
+            resume_id: number;
+            resume_label: string;
+            raw_score: number;
+            decayed_score: number;
+            details: any;
+            description: string;
+        }>>();
+
+        await runWithConcurrency(jobs, 5, async (job) => {
+            let description = getFullJobDescription(job);
+            if ((description || '').trim().length < 300 && job.ats_source === 'workday' && job.apply_url) {
+                const wdDesc = await fetchWorkdayDescription(job.apply_url);
+                if (wdDesc) description = wdDesc;
+            }
+            if (!description) return;
+
+            const daysPosted = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / (1000 * 60 * 60 * 24));
+            const recency = recencyMultiplier(daysPosted);
+
+            for (const resume of resumes) {
+                const result = scoreResume(resume.resume_text, description);
+                const decayedScore = Math.round(result.overall * recency);
+                const details = {
+                    skillsMatch: result.skillsMatch,
+                    relevance: result.relevance,
+                    visaSignal: result.visaSignal,
+                    impact: result.impact,
+                    matchedKeywords: result.matchedKeywords,
+                    missingKeywords: result.missingKeywords,
+                    resumeId: resume.id,
+                    resumeLabel: resume.label,
+                };
+                await upsertPairStmt.run(job.id, resume.id, decayedScore, JSON.stringify(details));
+                const prior = scoredByJob.get(job.id) || [];
+                prior.push({
+                    resume_id: resume.id,
+                    resume_label: resume.label,
+                    raw_score: result.overall,
+                    decayed_score: decayedScore,
+                    details,
+                    description,
+                });
+                scoredByJob.set(job.id, prior);
+            }
+        });
+
+        await db.prepare(
+            `UPDATE jobs j
+             SET hired_score = t.max_score
+             FROM (
+               SELECT job_id, MAX(score) AS max_score
+               FROM job_resume_scores
+               GROUP BY job_id
+             ) t
+             WHERE j.id = t.job_id`
+        ).run();
+        await db.prepare(
+            `UPDATE jobs j
+             SET hired_score_details = s.details::text
+             FROM (
+               SELECT DISTINCT ON (job_id) job_id, details, score
+               FROM job_resume_scores
+               ORDER BY job_id, score DESC, scored_at DESC
+             ) s
+             WHERE j.id = s.job_id`
+        ).run();
+
+        const ranked = jobs
+            .map((job) => {
+                const entries = scoredByJob.get(job.id) || [];
+                if (!entries.length) return null;
+                const best = entries.sort((a, b) => b.raw_score - a.raw_score)[0];
+                const daysPosted = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / (1000 * 60 * 60 * 24));
+                const recency = recencyMultiplier(daysPosted);
+                const optBoost = job.opt_friendly ? 1.10 : 1.0;
+                const sponsorBoost = ['high', 'medium'].includes((job.sponsor_tier || '').toLowerCase()) ? 1.10 : 1.0;
+                const visaPenalty = job.visa_signal === 0 ? 0.5 : 1.0;
+                const titleBoost = /\b(intern|internship|co-?op|junior|entry|new grad|graduate|associate)\b/i.test(job.title || '') ? 1.05 : 1.0;
+                const priority = Math.round(best.raw_score * recency * optBoost * sponsorBoost * visaPenalty * titleBoost);
+
+                const why: string[] = [];
+                why.push(`${best.raw_score}% resume match (${best.resume_label})`);
+                if (job.opt_friendly) why.push('OPT friendly');
+                if (job.sponsor_tier) why.push(`Sponsor tier: ${job.sponsor_tier}`);
+                if (job.visa_signal === 0) why.push('No-sponsor language detected');
+                why.push(`Posted ${Math.max(0, daysPosted)}d ago`);
+
+                return {
+                    ...job,
+                    priority,
+                    best_resume: {
+                        id: best.resume_id,
+                        label: best.resume_label,
+                    },
+                    best_score: best.raw_score,
+                    why: why.slice(0, 4),
+                };
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => b.priority - a.priority)
+            .slice(0, lim);
+
+        await db.prepare(
+            `INSERT INTO priority_scan_runs (scanned_at, hours, limit_count, total_jobs_considered)
+             VALUES (NOW(), ?, ?, ?)`
+        ).run(hoursBack, lim, jobs.length);
+
+        const lastScan = await db.prepare(
+            `SELECT scanned_at, hours, limit_count, total_jobs_considered
+             FROM priority_scan_runs
+             ORDER BY id DESC
+             LIMIT 1`
+        ).get();
+
+        return reply.send({
+            jobs: ranked,
+            total_considered: jobs.length,
+            resumes_used: resumes.length,
+            last_scan: lastScan,
+        });
+    });
     // GET /api/preferences
     app.get('/api/preferences', async (_request, reply) => {
         const prefs = await getPreferences();
@@ -395,30 +657,128 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         return reply.send({ key: vapidPublicKey });
     });
     // ── Resume Optimizer ──────────────────────────────────────────────────────
-    // POST /api/resume/upload — upload PDF, parse text, store in DB
+    // GET /api/resumes — list all stored resumes (without resume text)
+    app.get('/api/resumes', async (_request, reply) => {
+        const resumes = await listStoredResumes();
+        return reply.send({
+            resumes: resumes.map((r) => ({
+                id: r.id,
+                label: r.label,
+                filename: r.filename,
+                is_default: !!r.is_default,
+                uploaded_at: r.uploaded_at,
+            })),
+        });
+    });
+    // POST /api/resumes — upload a labeled resume
+    app.post('/api/resumes', async (request, reply) => {
+        const existing = await listStoredResumes();
+        if (existing.length >= 10) {
+            return reply.code(400).send({ error: 'Maximum 10 resumes allowed' });
+        }
+        const file = await request.file();
+        if (!file)
+            return reply.code(400).send({ error: 'No file uploaded' });
+        if (!isSupportedResumeFile(file)) {
+            return reply.code(400).send({ error: 'Only PDF, TXT, and .tex files are supported' });
+        }
+        const text = await parseUploadedResumeText(file);
+        if (!text.trim()) {
+            return reply.code(400).send({ error: 'Could not extract text from file' });
+        }
+        const rawLabelField = (file as any).fields?.label;
+        const fieldLabel = typeof rawLabelField === 'string'
+            ? rawLabelField
+            : typeof rawLabelField?.value === 'string'
+                ? rawLabelField.value
+                : '';
+        const label = (fieldLabel || file.filename.replace(/\.[^.]+$/, '') || 'Resume').trim().slice(0, 80);
+        const hasDefault = existing.some((r) => r.is_default);
+        const inserted = await db.prepare(
+            `INSERT INTO user_resumes (label, filename, resume_text, is_default, uploaded_at)
+             VALUES (?, ?, ?, ?, NOW())
+             RETURNING id`
+        ).run(label || 'Resume', file.filename, text.trim(), hasDefault ? 0 : 1);
+        return reply.send({
+            ok: true,
+            resume: {
+                id: inserted.lastInsertRowid,
+                label: label || 'Resume',
+                filename: file.filename,
+                is_default: !hasDefault,
+            },
+        });
+    });
+    // PATCH /api/resumes/:id — rename or set default
+    app.patch('/api/resumes/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const resumeId = parseInt(id);
+        if (isNaN(resumeId)) return reply.code(400).send({ error: 'Invalid resume id' });
+        const { label, is_default } = request.body as { label?: string; is_default?: boolean };
+
+        const existing = await db.prepare(
+            `SELECT id FROM user_resumes WHERE id = ?`
+        ).get(resumeId) as { id: number } | undefined;
+        if (!existing) return reply.code(404).send({ error: 'Resume not found' });
+
+        if (typeof label === 'string') {
+            await db.prepare(`UPDATE user_resumes SET label = ? WHERE id = ?`).run(label.trim().slice(0, 80) || 'Resume', resumeId);
+        }
+        if (is_default === true) {
+            await db.prepare(`UPDATE user_resumes SET is_default = FALSE`).run();
+            await db.prepare(`UPDATE user_resumes SET is_default = TRUE WHERE id = ?`).run(resumeId);
+        }
+        return reply.send({ ok: true });
+    });
+    // DELETE /api/resumes/:id — remove one resume
+    app.delete('/api/resumes/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const resumeId = parseInt(id);
+        if (isNaN(resumeId)) return reply.code(400).send({ error: 'Invalid resume id' });
+        const current = await db.prepare(
+            `SELECT id, is_default FROM user_resumes WHERE id = ?`
+        ).get(resumeId) as { id: number; is_default: boolean } | undefined;
+        if (!current) return reply.code(404).send({ error: 'Resume not found' });
+
+        await db.prepare(`DELETE FROM user_resumes WHERE id = ?`).run(resumeId);
+        if (current.is_default) {
+            const next = await db.prepare(`SELECT id FROM user_resumes ORDER BY uploaded_at DESC LIMIT 1`).get() as { id: number } | undefined;
+            if (next) {
+                await db.prepare(`UPDATE user_resumes SET is_default = TRUE WHERE id = ?`).run(next.id);
+            }
+        }
+        return reply.send({ ok: true });
+    });
+    // POST /api/resume/upload — compatibility shim (writes default resume)
     app.post('/api/resume/upload', async (request, reply) => {
         const file = await request.file();
         if (!file)
             return reply.code(400).send({ error: 'No file uploaded' });
-        const buffer = await file.toBuffer();
-        let text = '';
-        if (file.mimetype === 'application/pdf') {
-            const pdf = new PDFParse({ data: new Uint8Array(buffer) });
-            const result = await pdf.getText();
-            text = result.text;
-            await pdf.destroy();
-        }
-        else if (file.mimetype === 'text/plain' || file.filename.endsWith('.tex')) {
-            text = buffer.toString('utf-8');
-        }
-        else {
+        if (!isSupportedResumeFile(file)) {
             return reply.code(400).send({ error: 'Only PDF, TXT, and .tex files are supported' });
         }
+        const text = await parseUploadedResumeText(file);
         if (!text.trim()) {
             return reply.code(400).send({ error: 'Could not extract text from file' });
         }
+
+        const defaultResume = await getDefaultResume();
+        if (defaultResume) {
+            await db.prepare(
+                `UPDATE user_resumes
+                 SET filename = ?, resume_text = ?, uploaded_at = NOW()
+                 WHERE id = ?`
+            ).run(file.filename, text.trim(), defaultResume.id);
+        } else {
+            await db.prepare(
+                `INSERT INTO user_resumes (label, filename, resume_text, is_default, uploaded_at)
+                 VALUES ('Default', ?, ?, TRUE, NOW())`
+            ).run(file.filename, text.trim());
+        }
+
+        // Keep legacy single-resume table in sync for extension compatibility.
         await db.prepare(`INSERT INTO user_resume (id, filename, resume_text, uploaded_at)
-       VALUES (1, ?, ?, datetime('now'))
+       VALUES (1, ?, ?, NOW())
        ON CONFLICT(id) DO UPDATE SET
          filename = excluded.filename,
          resume_text = excluded.resume_text,
@@ -427,80 +787,47 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
     // GET /api/resume — get stored resume
     app.get('/api/resume', async (_request, reply) => {
-        const row = await db.prepare('SELECT * FROM user_resume WHERE id = 1').get() as any;
+        const row = await getDefaultResume();
         if (!row || !row.resume_text) {
             return reply.send({ uploaded: false });
         }
         return reply.send({
             uploaded: true,
+            resumeId: row.id,
+            label: row.label,
             filename: row.filename,
             resumeText: row.resume_text,
             uploadedAt: row.uploaded_at,
         });
     });
-    // POST /api/resume/analyze — score resume against a specific job
-    app.post('/api/resume/analyze', async (request, reply) => {
-        const { jobId } = request.body as {
-            jobId: number;
-        };
-        const resume = await db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
-        if (!resume?.resume_text) {
-            return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
-        }
-        const job = await db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
-        if (!job) {
-            return reply.code(404).send({ error: 'Job not found' });
-        }
-        // Use full description from raw_json if available, else snippet
-        let description = job.description_snippet || '';
-        if (job.raw_json) {
-            try {
-                const raw = JSON.parse(job.raw_json);
-                description = raw.description || raw.content || raw.jobDescription || description;
-            }
-            catch { /* use snippet */ }
-        }
-        // For Workday jobs, fetch full description from detail API if we don't have one
-        if ((!description || description === job.description_snippet) && job.ats_source === 'workday' && job.apply_url) {
-            const wdDesc = await fetchWorkdayDescription(job.apply_url);
-            if (wdDesc)
-                description = wdDesc;
-        }
-        if (!description) {
-            return reply.code(400).send({ error: 'Job has no description to analyze against' });
-        }
-        const result = scoreResume(resume.resume_text, description);
-        return reply.send(result);
-    });
-    // POST /api/resume/score-all — batch score all jobs against uploaded resume
-    app.post('/api/resume/score-all', async (_request, reply) => {
-        const resume = await db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
-        if (!resume?.resume_text) {
-            return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
-        }
-        const jobs = await db.prepare(`SELECT id, ats_source, apply_url, description_snippet, raw_json, posted_at FROM jobs WHERE is_us_job(location) = 1`).all() as any[];
-        const updateStmt = db.prepare('UPDATE jobs SET hired_score = ?, hired_score_details = ? WHERE id = ?');
+    async function scoreAllJobsForResume(resume: StoredResumeRow): Promise<{ scored: number; skipped: number; total: number }> {
+        const jobs = await db.prepare(
+            `SELECT id, ats_source, apply_url, description_snippet, raw_json, posted_at
+             FROM jobs
+             WHERE is_us_job(location) = 1`
+        ).all() as any[];
+        const upsertPairStmt = db.prepare(
+            `INSERT INTO job_resume_scores (job_id, resume_id, score, details, scored_at)
+             VALUES (?, ?, ?, ?::jsonb, NOW())
+             ON CONFLICT (job_id, resume_id)
+             DO UPDATE SET score = EXCLUDED.score, details = EXCLUDED.details, scored_at = NOW()`
+        );
+        const visaUpdateStmt = db.prepare('UPDATE jobs SET visa_signal = ? WHERE id = ?');
         let scored = 0;
         let skipped = 0;
-        for (const job of jobs) {
-            let description = job.description_snippet || '';
-            if (job.raw_json) {
-                try {
-                    const raw = JSON.parse(job.raw_json);
-                    description = raw.description || raw.content || raw.jobDescription || description;
-                }
-                catch { /* use snippet */ }
-            }
-            // For Workday jobs, try fetching full description
-            if ((!description || description === job.description_snippet) && job.ats_source === 'workday' && job.apply_url) {
+
+        await runWithConcurrency(jobs, 6, async (job) => {
+            let description = getFullJobDescription(job);
+            if ((description || '').trim().length < 300 && job.ats_source === 'workday' && job.apply_url) {
                 const wdDesc = await fetchWorkdayDescription(job.apply_url);
                 if (wdDesc)
                     description = wdDesc;
             }
             if (!description) {
                 skipped++;
-                continue;
+                return;
             }
+
             const result = scoreResume(resume.resume_text, description);
             const daysPosted = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / (1000 * 60 * 60 * 24));
             const decayedScore = Math.round(result.overall * recencyMultiplier(daysPosted));
@@ -511,13 +838,93 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
                 impact: result.impact,
                 matchedKeywords: result.matchedKeywords,
                 missingKeywords: result.missingKeywords,
+                resumeId: resume.id,
+                resumeLabel: resume.label,
             });
             const visaSignal = quickVisaSignal(description);
-            await updateStmt.run(decayedScore, details, job.id);
-            await db.prepare('UPDATE jobs SET visa_signal = ? WHERE id = ?').run(visaSignal, job.id);
+            await upsertPairStmt.run(job.id, resume.id, decayedScore, details);
+            await visaUpdateStmt.run(visaSignal, job.id);
             scored++;
+        });
+
+        await db.prepare(
+            `UPDATE jobs j
+             SET hired_score = t.max_score
+             FROM (
+               SELECT job_id, MAX(score) AS max_score
+               FROM job_resume_scores
+               GROUP BY job_id
+             ) t
+             WHERE j.id = t.job_id`
+        ).run();
+        await db.prepare(
+            `UPDATE jobs j
+             SET hired_score_details = s.details::text
+             FROM (
+               SELECT DISTINCT ON (job_id) job_id, details, score
+               FROM job_resume_scores
+               ORDER BY job_id, score DESC, scored_at DESC
+             ) s
+             WHERE j.id = s.job_id`
+        ).run();
+
+        return { scored, skipped, total: jobs.length };
+    }
+    // POST /api/resume/analyze — score resume against a specific job
+    app.post('/api/resume/analyze', async (request, reply) => {
+        const { jobId, resumeId } = request.body as {
+            jobId: number;
+            resumeId?: number;
+        };
+        const resume = await getResumeForJob(jobId, resumeId);
+        if (!resume?.resume_text) {
+            return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
         }
-        return reply.send({ ok: true, scored, skipped, total: jobs.length });
+        const job = await db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+        if (!job) {
+            return reply.code(404).send({ error: 'Job not found' });
+        }
+        // Use full description from raw_json if available, else snippet
+        let description = getFullJobDescription(job);
+        // For Workday jobs, fetch full description from detail API if we don't have one
+        if ((!description || description === job.description_snippet) && job.ats_source === 'workday' && job.apply_url) {
+            const wdDesc = await fetchWorkdayDescription(job.apply_url);
+            if (wdDesc)
+                description = wdDesc;
+        }
+        if (!description) {
+            return reply.code(400).send({ error: 'Job has no description to analyze against' });
+        }
+        const result = scoreResume(resume.resume_text, description);
+        return reply.send({
+            ...result,
+            resume: {
+                id: resume.id,
+                label: resume.label,
+                filename: resume.filename,
+            },
+        });
+    });
+    // POST /api/resumes/:id/score-all — score all jobs for one resume
+    app.post('/api/resumes/:id/score-all', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const resumeId = parseInt(id);
+        if (isNaN(resumeId)) return reply.code(400).send({ error: 'Invalid resume id' });
+        const resume = await db.prepare(
+            `SELECT id, label, filename, resume_text, is_default, uploaded_at FROM user_resumes WHERE id = ?`
+        ).get(resumeId) as StoredResumeRow | undefined;
+        if (!resume) return reply.code(404).send({ error: 'Resume not found' });
+        const result = await scoreAllJobsForResume(resume);
+        return reply.send({ ok: true, resumeId, ...result });
+    });
+    // POST /api/resume/score-all — batch score all jobs against uploaded resume
+    app.post('/api/resume/score-all', async (_request, reply) => {
+        const resume = await getDefaultResume();
+        if (!resume?.resume_text) {
+            return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
+        }
+        const result = await scoreAllJobsForResume(resume);
+        return reply.send({ ok: true, ...result });
     });
     // POST /api/visa-scan — compute visa_signal for all jobs that lack it
     app.post('/api/visa-scan', async (_request, reply) => {
@@ -546,14 +953,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         if (!apiKey || apiKey === 'your_api_key_here') {
             return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
         }
-        const { jobId, jobDescription } = request.body as {
+        const { jobId, jobDescription, resumeId } = request.body as {
             jobId?: number;
             jobDescription?: string;
+            resumeId?: number;
         };
         if (!jobId && !jobDescription?.trim()) {
             return reply.code(400).send({ error: 'Either jobId or jobDescription is required' });
         }
-        const resume = await db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
+        const resume = await getResumeForJob(jobId || -1, resumeId);
         if (!resume?.resume_text) {
             return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
         }
@@ -622,7 +1030,17 @@ ${stripHtml(description).slice(0, 3000)}
             messages,
         });
         const text = completion.choices[0]?.message?.content || '';
-        return reply.send({ ok: true, coverLetter: text, jobTitle, company: jobCompany });
+        return reply.send({
+            ok: true,
+            coverLetter: text,
+            jobTitle,
+            company: jobCompany,
+            resume: {
+                id: resume.id,
+                label: resume.label,
+                filename: resume.filename,
+            },
+        });
     });
     // POST /api/jobs/from-jd — extract job details from pasted JD and add to tracker
     app.post('/api/jobs/from-jd', async (request, reply) => {
@@ -687,10 +1105,12 @@ ${jdText.slice(0, 4000)}`,
         if (!apiKey || apiKey === 'your_api_key_here') {
             return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
         }
-        const { fields, profile, jobDescription } = request.body as {
+        const { fields, profile, jobDescription, jobId, resumeId } = request.body as {
             fields: AiFillField[];
             profile: Record<string, any>;
             jobDescription?: string;
+            jobId?: number;
+            resumeId?: number;
         };
         if (!fields?.length) {
             return reply.send({ answers: {} });
@@ -701,9 +1121,9 @@ ${jdText.slice(0, 4000)}`,
         const addr = personal.address || {};
         const visa = p.visa || {};
         const workAuth = p.work_auth_answers || {};
-        const answers = p.answers || {};
+        const profileAnswers = p.answers || {};
         // Include uploaded resume for richer context (skills, experience, projects)
-        const resumeRow = await db.prepare('SELECT resume_text FROM user_resume WHERE id = 1').get() as any;
+        const resumeRow = await getResumeForJob(jobId || -1, resumeId);
         const resumeSection = resumeRow?.resume_text
             ? `\n## Candidate Resume\n${resumeRow.resume_text.slice(0, 3000)}\n`
             : '';
@@ -712,7 +1132,7 @@ ${jdText.slice(0, 4000)}`,
             : '';
         try {
             const client = new OpenAI({ apiKey });
-            const answers: Record<string, string> = {};
+            const aiAnswers: Record<string, string> = {};
             const groupedFields = {
                 'gpt-5-nano': cappedFields.filter(field => chooseAiFillModel(field) === 'gpt-5-nano'),
                 'gpt-5.1': cappedFields.filter(field => chooseAiFillModel(field) === 'gpt-5.1'),
@@ -734,11 +1154,11 @@ Visa Status: ${visa.status || ''} (OPT expiry: ${visa.opt_expiry || 'N/A'})
 Authorized to work in US: ${workAuth.authorized_to_work || ''}
 Requires sponsorship now: ${workAuth.require_sponsorship_now || ''}
 Requires sponsorship in future: ${workAuth.require_sponsorship_future || ''}
-Years of experience: ${answers.years_experience || ''}
-Highest education: ${answers.highest_education || ''} in ${answers.degree_field || ''}
-Salary expectation: $${answers.salary_expectation || ''}
-Notice period: ${answers.notice_period || ''}
-Pronouns: ${answers.pronouns || ''}
+Years of experience: ${profileAnswers.years_experience || ''}
+Highest education: ${profileAnswers.highest_education || ''} in ${profileAnswers.degree_field || ''}
+Salary expectation: $${profileAnswers.salary_expectation || ''}
+Notice period: ${profileAnswers.notice_period || ''}
+Pronouns: ${profileAnswers.pronouns || ''}
 ${resumeSection}${jdSection}
 ## Form Fields to Fill
 ${JSON.stringify(modelFields, null, 2)}
@@ -751,9 +1171,9 @@ ${JSON.stringify(modelFields, null, 2)}
 - Output ONLY valid JSON in this exact format, no prose, no markdown code fences:
 {"answers": {"<label text>": "<answer>", ...}}`;
                 const modelAnswers = await buildAiFillPrompt(client, prompt, model);
-                Object.assign(answers, modelAnswers);
+                Object.assign(aiAnswers, modelAnswers);
             }
-            return reply.send({ answers });
+            return reply.send({ answers: aiAnswers });
         }
         catch (err: any) {
             console.error('[ai-fill] error:', err);

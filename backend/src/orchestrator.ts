@@ -14,15 +14,33 @@ import { classifyArchetype } from './data/archetypes';
  * "Software Engineer" roles at the same company in NYC vs SF).
  */
 function normalizeForDedup(s: string): string {
-  return (s || '')
+  const normalized = (s || '')
     .toLowerCase()
     // Strip common parenthetical/bracketed suffixes like "(Remote)", "[US]"
     .replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')
-    // Strip trailing location/level suffixes after an em/en/hyphen
-    .replace(/\s+[-–—]\s+.*$/, '')
     // Collapse whitespace
     .replace(/\s+/g, ' ')
     .trim();
+  return stripLikelyLocationSuffix(normalized);
+}
+
+function stripLikelyLocationSuffix(s: string): string {
+  const parts = s.split(/\s+[-–—]\s+/);
+  if (parts.length < 2) return s;
+  const suffix = parts.slice(1).join(' - ');
+  if (looksLikeLocationSuffix(suffix)) {
+    return parts[0].trim();
+  }
+  return s;
+}
+
+function looksLikeLocationSuffix(s: string): boolean {
+  const v = s.toLowerCase().trim();
+  if (!v) return false;
+  if (/(remote|hybrid|onsite|on-site|united states|u\.s\.|usa|us only|anywhere)/.test(v)) return true;
+  if (/\b(al|ak|az|ar|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy)\b/.test(v)) return true;
+  if (/^[a-z.\s]+,\s*[a-z.\s]+$/.test(v)) return true; // e.g. "new york, ny"
+  return false;
 }
 
 function deduplicateJobs(jobs: Job[]): Job[] {
@@ -70,30 +88,32 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
   isRunning = true;
   const startedAt = new Date().toISOString();
   const errors: string[] = [];
+  let runId = -1;
 
-  const runResult = await db.prepare(
-    `INSERT INTO runs (started_at, status) VALUES (?, 'running') RETURNING id`
-  ).run(startedAt);
-  const runId = runResult.lastInsertRowid ?? -1;
-
-  console.log(`[Orchestrator] Run #${runId} started`);
-
-  let jobs: Job[] = [];
   try {
-    jobs = await runAllCollectors(hoursBack);
-  } catch (err: any) {
-    errors.push(err.message);
-  }
+    const runResult = await db.prepare(
+      `INSERT INTO runs (started_at, status) VALUES (?, 'running') RETURNING id`
+    ).run(startedAt);
+    runId = runResult.lastInsertRowid ?? -1;
 
-  // Deduplicate across ATS sources (same title + company)
-  const beforeDedup = jobs.length;
-  jobs = deduplicateJobs(jobs);
-  const dupsRemoved = beforeDedup - jobs.length;
-  if (dupsRemoved > 0) {
-    console.log(`[Orchestrator] Removed ${dupsRemoved} cross-ATS duplicates`);
-  }
+    console.log(`[Orchestrator] Run #${runId} started`);
 
-  const insertJob = db.prepare(`
+    let jobs: Job[] = [];
+    try {
+      jobs = await runAllCollectors(hoursBack);
+    } catch (err: any) {
+      errors.push(err.message);
+    }
+
+    // Deduplicate across ATS sources (same title + company)
+    const beforeDedup = jobs.length;
+    jobs = deduplicateJobs(jobs);
+    const dupsRemoved = beforeDedup - jobs.length;
+    if (dupsRemoved > 0) {
+      console.log(`[Orchestrator] Removed ${dupsRemoved} cross-ATS duplicates`);
+    }
+
+    const insertJob = db.prepare(`
     INSERT INTO jobs
       (external_id, title, company, ats_source, location, remote, posted_at,
        apply_url, job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
@@ -104,122 +124,126 @@ export async function runCollection(hoursBack: number = 48): Promise<RunResult> 
     RETURNING id
   `);
 
-  let jobsNew = 0;
-  const newJobIds: number[] = [];
+    let jobsNew = 0;
+    const newJobIds: number[] = [];
 
-  try {
-    for (const job of jobs) {
-      const result = await insertJob.run({
-        ...job,
-        remote: job.remote ? 1 : 0,
-      });
-      if (result.changes > 0) {
-        jobsNew++;
-        if (result.lastInsertRowid !== undefined) {
-          newJobIds.push(result.lastInsertRowid);
-        }
-      }
-    }
-  } catch (err: any) {
-    errors.push(`DB insert error: ${err.message}`);
-  }
-
-  // Score newly inserted jobs based on user preferences
-  try {
-    await scoreNewJobs(newJobIds);
-  } catch (err: any) {
-    errors.push(`Scoring error: ${err.message}`);
-  }
-
-  // Parse experience-years from descriptions for Junior Roles filtering, and
-  // remove postings that require US citizenship / active clearance (often
-  // only mentioned in the full description, not the snippet).
-  let citizenshipRejected = 0;
-  try {
-    if (newJobIds.length > 0) {
-      const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
-      const deleteStmt = db.prepare('DELETE FROM jobs WHERE id = ?');
-      const rows = await db.prepare(
-        `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-      ).all(...newJobIds) as any[];
-
-      for (const row of rows) {
-        let desc = row.description_snippet || '';
-        if (row.raw_json) {
-          try {
-            const raw = JSON.parse(row.raw_json);
-            desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
-            if (typeof desc !== 'string') desc = '';
-            desc = desc.replace(/<[^>]+>/g, ' ');
-          } catch {
-            // use snippet
+    try {
+      for (const job of jobs) {
+        const result = await insertJob.run({
+          ...job,
+          remote: job.remote ? 1 : 0,
+        });
+        if (result.changes > 0) {
+          jobsNew++;
+          if (result.lastInsertRowid !== undefined) {
+            newJobIds.push(result.lastInsertRowid);
           }
         }
+      }
+    } catch (err: any) {
+      errors.push(`DB insert error: ${err.message}`);
+    }
 
-        if (requiresUsCitizenship(row.title, desc)) {
-          await deleteStmt.run(row.id);
-          citizenshipRejected++;
-          jobsNew--;
-          continue;
+    // Score newly inserted jobs based on user preferences
+    try {
+      await scoreNewJobs(newJobIds);
+    } catch (err: any) {
+      errors.push(`Scoring error: ${err.message}`);
+    }
+
+    // Parse experience-years from descriptions for Junior Roles filtering, and
+    // remove postings that require US citizenship / active clearance (often
+    // only mentioned in the full description, not the snippet).
+    let citizenshipRejected = 0;
+    try {
+      if (newJobIds.length > 0) {
+        const expStmt = db.prepare('UPDATE jobs SET max_experience_years = ? WHERE id = ?');
+        const deleteStmt = db.prepare('DELETE FROM jobs WHERE id = ?');
+        const rows = await db.prepare(
+          `SELECT id, title, description_snippet, raw_json FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+        ).all(...newJobIds) as any[];
+
+        for (const row of rows) {
+          let desc = row.description_snippet || '';
+          if (row.raw_json) {
+            try {
+              const raw = JSON.parse(row.raw_json);
+              desc = raw.description || raw.content || raw.descriptionPlain || raw.jobDescription || desc;
+              if (typeof desc !== 'string') desc = '';
+              desc = desc.replace(/<[^>]+>/g, ' ');
+            } catch {
+              // use snippet
+            }
+          }
+
+          if (requiresUsCitizenship(row.title, desc)) {
+            await deleteStmt.run(row.id);
+            citizenshipRejected++;
+            jobsNew--;
+            continue;
+          }
+
+          const years = parseExperienceYears(`${row.title} ${desc}`);
+          if (years !== null) {
+            await expStmt.run(years, row.id);
+          }
         }
+      }
+    } catch (err: any) {
+      errors.push(`Experience parsing error: ${err.message}`);
+    }
+    if (citizenshipRejected > 0) {
+      console.log(`[Orchestrator] Removed ${citizenshipRejected} citizenship/clearance-only postings`);
+    }
 
-        const years = parseExperienceYears(`${row.title} ${desc}`);
-        if (years !== null) {
-          await expStmt.run(years, row.id);
+    // Flag OPT-friendly companies and set sponsor tier + H-1B probability for new jobs
+    try {
+      if (newJobIds.length > 0) {
+        const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ?, h1b_probability = ?, h1b_lca_count = ? WHERE id = ?');
+        const optRows = await db.prepare(
+          `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+        ).all(...newJobIds) as { id: number; company: string }[];
+
+        for (const row of optRows) {
+          const tier = getSponsorTier(row.company);
+          const h1bData = await fetchH1bHistoricalData(row.company);
+          await optStmt.run(tier ? 1 : 0, tier, h1bData.sponsorshipProbability, h1bData.historicalLcaCount, row.id);
         }
       }
+    } catch (err: any) {
+      errors.push(`OPT flagging error: ${err.message}`);
     }
-  } catch (err: any) {
-    errors.push(`Experience parsing error: ${err.message}`);
-  }
-  if (citizenshipRejected > 0) {
-    console.log(`[Orchestrator] Removed ${citizenshipRejected} citizenship/clearance-only postings`);
-  }
 
-  // Flag OPT-friendly companies and set sponsor tier + H-1B probability for new jobs
-  try {
-    if (newJobIds.length > 0) {
-      const optStmt = db.prepare('UPDATE jobs SET opt_friendly = ?, sponsor_tier = ?, h1b_probability = ?, h1b_lca_count = ? WHERE id = ?');
-      const optRows = await db.prepare(
-        `SELECT id, company FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-      ).all(...newJobIds) as { id: number; company: string }[];
+    // Classify archetype on each new job (deterministic, title-keyword based)
+    try {
+      if (newJobIds.length > 0) {
+        const archStmt = db.prepare('UPDATE jobs SET archetype = ? WHERE id = ?');
+        const archRows = await db.prepare(
+          `SELECT id, title, description_snippet FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
+        ).all(...newJobIds) as { id: number; title: string; description_snippet: string }[];
 
-      for (const row of optRows) {
-        const tier = getSponsorTier(row.company);
-        const h1bData = await fetchH1bHistoricalData(row.company);
-        await optStmt.run(tier ? 1 : 0, tier, h1bData.sponsorshipProbability, h1bData.historicalLcaCount, row.id);
+        for (const row of archRows) {
+          const archetype = classifyArchetype(row.title, row.description_snippet || '');
+          await archStmt.run(archetype, row.id);
+        }
       }
+    } catch (err: any) {
+      errors.push(`Archetype classification error: ${err.message}`);
     }
-  } catch (err: any) {
-    errors.push(`OPT flagging error: ${err.message}`);
-  }
 
-  // Classify archetype on each new job (deterministic, title-keyword based)
-  try {
-    if (newJobIds.length > 0) {
-      const archStmt = db.prepare('UPDATE jobs SET archetype = ? WHERE id = ?');
-      const archRows = await db.prepare(
-        `SELECT id, title, description_snippet FROM jobs WHERE id IN (${newJobIds.map(() => '?').join(',')})`
-      ).all(...newJobIds) as { id: number; title: string; description_snippet: string }[];
+    jobsNew = Math.max(0, jobsNew);
 
-      for (const row of archRows) {
-        const archetype = classifyArchetype(row.title, row.description_snippet || '');
-        await archStmt.run(archetype, row.id);
-      }
-    }
-  } catch (err: any) {
-    errors.push(`Archetype classification error: ${err.message}`);
-  }
-
-  const finishedAt = new Date().toISOString();
-  await db.prepare(`
+    const finishedAt = new Date().toISOString();
+    await db.prepare(`
     UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, errors = ?, status = 'completed'
     WHERE id = ?
   `).run(finishedAt, jobs.length, jobsNew, errors.join('; '), runId);
 
-  isRunning = false;
-  console.log(`[Orchestrator] Run #${runId} complete: ${jobs.length} found, ${jobsNew} new, ${dupsRemoved} cross-ATS dupes removed`);
+    console.log(`[Orchestrator] Run #${runId} complete: ${jobs.length} found, ${jobsNew} new, ${dupsRemoved} cross-ATS dupes removed`);
 
-  return { runId, jobsFound: jobs.length, jobsNew, errors, status: 'completed' };
+    return { runId, jobsFound: jobs.length, jobsNew, errors, status: 'completed' };
+  } finally {
+    isRunning = false;
+  }
 }
 

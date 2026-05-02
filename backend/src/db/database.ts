@@ -376,6 +376,32 @@ export async function initDb(): Promise<void> {
       CONSTRAINT user_resume_single CHECK (id = 1)
     );
 
+    CREATE TABLE IF NOT EXISTS user_resumes (
+      id SERIAL PRIMARY KEY,
+      label TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      resume_text TEXT NOT NULL,
+      is_default BOOLEAN DEFAULT FALSE,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS job_resume_scores (
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      resume_id INTEGER NOT NULL REFERENCES user_resumes(id) ON DELETE CASCADE,
+      score INTEGER NOT NULL,
+      details JSONB,
+      scored_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (job_id, resume_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS priority_scan_runs (
+      id SERIAL PRIMARY KEY,
+      scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      hours INTEGER NOT NULL DEFAULT 48,
+      limit_count INTEGER NOT NULL DEFAULT 15,
+      total_jobs_considered INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS answer_cache (
       id SERIAL PRIMARY KEY,
       question_text TEXT NOT NULL,
@@ -408,6 +434,9 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_jobs_relevance ON jobs(relevance_score);
     CREATE INDEX IF NOT EXISTS idx_jobs_queue_position ON jobs(queue_position);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash);
+    CREATE INDEX IF NOT EXISTS idx_user_resumes_default ON user_resumes(is_default);
+    CREATE INDEX IF NOT EXISTS idx_job_resume_scores_resume ON job_resume_scores(resume_id);
+    CREATE INDEX IF NOT EXISTS idx_job_resume_scores_score ON job_resume_scores(score DESC);
   `);
 
   // Migration: upgrade non-unique index to unique (for existing databases)
@@ -415,6 +444,21 @@ export async function initDb(): Promise<void> {
   await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_cache_hash ON answer_cache(question_hash)`);
 
   await db.prepare('INSERT INTO user_preferences (id) VALUES (1) ON CONFLICT (id) DO NOTHING').run();
+
+  // One-time migration from legacy single-resume storage.
+  await db.prepare(
+    `INSERT INTO user_resumes (label, filename, resume_text, is_default, uploaded_at)
+     SELECT
+       'Default',
+       COALESCE(NULLIF(filename, ''), 'resume'),
+       resume_text,
+       TRUE,
+       COALESCE(uploaded_at, NOW())
+     FROM user_resume
+     WHERE id = 1
+       AND COALESCE(resume_text, '') <> ''
+       AND NOT EXISTS (SELECT 1 FROM user_resumes)`
+  ).run();
 
   // Remove cross-ATS duplicates (keep one per title+company)
   const dupeCountRow = await db.prepare(`

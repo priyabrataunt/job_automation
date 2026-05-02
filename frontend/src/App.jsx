@@ -307,6 +307,7 @@ function ScoreTooltip({ details, children }) {
 
 function JobCard({ job, onStatusChange, onOptimize, onQueue, onOutreach }) {
   let fullDescription = job.description || job.description_snippet || ''
+  let bestResumeLabel = ''
   if (job.raw_json) {
     try {
       const parsed = typeof job.raw_json === 'string' ? JSON.parse(job.raw_json) : job.raw_json
@@ -314,6 +315,14 @@ function JobCard({ job, onStatusChange, onOptimize, onQueue, onOutreach }) {
       if (manualDescription) fullDescription = manualDescription
     } catch {
       fullDescription = job.description || job.description_snippet || ''
+    }
+  }
+  if (job.hired_score_details) {
+    try {
+      const parsed = typeof job.hired_score_details === 'string' ? JSON.parse(job.hired_score_details) : job.hired_score_details
+      bestResumeLabel = parsed?.resumeLabel || ''
+    } catch {
+      bestResumeLabel = ''
     }
   }
 
@@ -339,15 +348,23 @@ function JobCard({ job, onStatusChange, onOptimize, onQueue, onOutreach }) {
             >{job.title}</a>
             {job.relevance_score != null && <ScoreBar score={job.relevance_score} />}
             {job.hired_score != null && (
-              <ScoreTooltip details={job.hired_score_details} score={job.hired_score}>
-                <span style={{
-                  background: job.hired_score >= 70 ? 'var(--bg-green)' : job.hired_score >= 40 ? 'var(--bg-yellow)' : 'var(--bg-surface-alt)',
-                  color: job.hired_score >= 70 ? 'var(--fg-green)' : job.hired_score >= 40 ? 'var(--fg-yellow)' : 'var(--text-muted)',
-                  fontSize: 11, fontWeight: 700,
-                  padding: '2px 8px', borderRadius: 99,
-                  whiteSpace: 'nowrap',
-                }}>🎯 {job.hired_score}%</span>
-              </ScoreTooltip>
+              <>
+                <ScoreTooltip details={job.hired_score_details} score={job.hired_score}>
+                  <span style={{
+                    background: job.hired_score >= 70 ? 'var(--bg-green)' : job.hired_score >= 40 ? 'var(--bg-yellow)' : 'var(--bg-surface-alt)',
+                    color: job.hired_score >= 70 ? 'var(--fg-green)' : job.hired_score >= 40 ? 'var(--fg-yellow)' : 'var(--text-muted)',
+                    fontSize: 11, fontWeight: 700,
+                    padding: '2px 8px', borderRadius: 99,
+                    whiteSpace: 'nowrap',
+                  }}>🎯 {job.hired_score}%</span>
+                </ScoreTooltip>
+                {bestResumeLabel && (
+                  <span style={{
+                    background: 'var(--bg-surface-deep)', color: 'var(--text-secondary)',
+                    fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 600,
+                  }}>{bestResumeLabel}</span>
+                )}
+              </>
             )}
           </div>
           <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 2 }}>{job.company}</div>
@@ -1693,18 +1710,30 @@ function DigestView({ onStatusChange, onOptimize, onQueue, onOutreach }) {
   const [jobs, setJobs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [scanning, setScanning] = useState(false)
+  const [hours, setHours] = useState('48')
+  const [lastScan, setLastScan] = useState(null)
+
+  const load = useCallback(async (scanHours) => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/api/priority-scan?hours=${scanHours}&limit=15`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Priority scan failed')
+      setJobs(data.jobs || [])
+      setTotal((data.jobs || []).length)
+      setLastScan(data.last_scan || null)
+    } catch {
+      setJobs([])
+      setTotal(0)
+      setLastScan(null)
+    }
+    setLoading(false)
+  }, [])
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const res = await fetch(`${API}/api/digest?limit=50`)
-      const data = await res.json()
-      setJobs(data.jobs || [])
-      setTotal(data.total || 0)
-      setLoading(false)
-    }
-    load()
-  }, [])
+    load(hours)
+  }, [hours, load])
 
   function handleStatusChange(id, status) {
     onStatusChange(id, status)
@@ -1715,24 +1744,88 @@ function DigestView({ onStatusChange, onOptimize, onQueue, onOutreach }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Today's Digest</h2>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>⭐ Top Picks</h2>
         <span style={{
           background: 'var(--bg-green)', color: 'var(--fg-green)',
           fontSize: 12, fontWeight: 700,
           padding: '3px 10px', borderRadius: 99,
-        }}>{total} jobs in last 24h</span>
+        }}>{total} priority jobs</span>
+        <select
+          value={hours}
+          onChange={(e) => setHours(e.target.value)}
+          style={{
+            background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', border: 'none',
+            borderRadius: 6, padding: '6px 10px', fontSize: 12,
+          }}
+        >
+          <option value="6">Last 6h</option>
+          <option value="24">Last 24h</option>
+          <option value="48">Last 48h</option>
+          <option value="168">Last 7d</option>
+        </select>
+        <button
+          onClick={async () => {
+            setScanning(true)
+            await load(hours)
+            setScanning(false)
+          }}
+          style={{
+            background: scanning ? 'var(--bg-surface-alt)' : '#1e66f5',
+            color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px',
+            cursor: scanning ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600,
+          }}
+          disabled={scanning}
+        >{scanning ? 'Scanning...' : '🔄 Rescan'}</button>
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 16px' }}>
-        Top jobs ranked by your preferences. Update settings to improve results.
+        Ranked across all resumes. Apply to these first for best impact.
       </p>
+      {lastScan?.scanned_at && (
+        <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 12 }}>
+          Last scanned: {timeAgo(lastScan.scanned_at)}
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {jobs.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--text-empty)', padding: 40 }}>
-            No jobs in the last 24h. Run a collection first!
+            No ranked jobs yet. Upload resumes and run a scan.
           </div>
-        ) : jobs.map(job => (
-          <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onQueue={onQueue} onOutreach={onOutreach} />
+        ) : jobs.map((job, idx) => (
+          <div key={job.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8,
+              padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+            }}>
+              <span style={{ fontWeight: 800, color: 'var(--text-link)', fontSize: 14 }}>#{idx + 1}</span>
+              <span style={{
+                background: 'var(--bg-green)', color: 'var(--fg-green)', borderRadius: 99,
+                padding: '2px 10px', fontSize: 11, fontWeight: 700,
+              }}>Priority {job.priority}</span>
+              {job.best_resume && (
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                  🎯 {job.best_resume.label} · {job.best_score}%
+                </span>
+              )}
+              {(job.why || []).map((w) => (
+                <span key={w} style={{
+                  background: 'var(--bg-surface-deep)', color: 'var(--text-secondary)',
+                  borderRadius: 99, padding: '2px 8px', fontSize: 10,
+                }}>{w}</span>
+              ))}
+              {job.best_resume && (
+                <button
+                  onClick={() => onOptimize({ ...job, _preferredResumeId: job.best_resume.id })}
+                  style={{
+                    marginLeft: 'auto',
+                    background: '#8839ef', color: '#fff', border: 'none',
+                    borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer',
+                  }}
+                >Apply with this resume</button>
+              )}
+            </div>
+            <JobCard job={job} onStatusChange={handleStatusChange} onOptimize={onOptimize} onQueue={onQueue} onOutreach={onOutreach} />
+          </div>
         ))}
       </div>
     </div>
@@ -2149,6 +2242,124 @@ function ThemeToggle({ dark, onToggle }) {
   )
 }
 
+function ResumeManagerModal({ resumes, onClose, onUpdated, onScoreResume }) {
+  const [uploading, setUploading] = useState(false)
+  const [label, setLabel] = useState('')
+  const [error, setError] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const fileRef = useRef(null)
+
+  async function refresh() {
+    await onUpdated?.()
+  }
+
+  async function uploadResume(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      if (label.trim()) form.append('label', label.trim())
+      const res = await fetch(`${API}/api/resumes`, { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      setLabel('')
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    }
+    setUploading(false)
+    e.target.value = ''
+  }
+
+  async function setDefaultResume(id) {
+    setBusyId(id)
+    await fetch(`${API}/api/resumes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_default: true }),
+    })
+    await refresh()
+    setBusyId(null)
+  }
+
+  async function renameResume(id, currentLabel) {
+    const next = prompt('Rename resume', currentLabel)
+    if (next == null) return
+    setBusyId(id)
+    await fetch(`${API}/api/resumes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: next }),
+    })
+    await refresh()
+    setBusyId(null)
+  }
+
+  async function deleteResume(id) {
+    if (!confirm('Delete this resume?')) return
+    setBusyId(id)
+    await fetch(`${API}/api/resumes/${id}`, { method: 'DELETE' })
+    await refresh()
+    setBusyId(null)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }} onClick={onClose}>
+      <div style={{
+        width: '100%', maxWidth: 680, background: 'var(--bg-header)', border: '1px solid var(--border)',
+        borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 14,
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 17 }}>Resume Manager</h3>
+          <button onClick={onClose} style={{ border: 'none', background: 'var(--bg-surface-alt)', borderRadius: 6, padding: '6px 10px', color: 'var(--text-primary)', cursor: 'pointer' }}>Close</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Optional label (Backend, ML, Full Stack)"
+            style={{ flex: 1, background: 'var(--bg-surface-alt)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '8px 10px', color: 'var(--text-primary)' }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            style={{ border: 'none', background: '#1e66f5', color: '#fff', borderRadius: 6, padding: '8px 12px', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer' }}
+          >{uploading ? 'Uploading...' : 'Upload Resume'}</button>
+          <input ref={fileRef} type="file" accept=".pdf,.txt,.tex" style={{ display: 'none' }} onChange={uploadResume} />
+        </div>
+        {error && <div style={{ fontSize: 12, color: 'var(--fg-red)' }}>{error}</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 380, overflowY: 'auto' }}>
+          {resumes.length === 0 && (
+            <div style={{ color: 'var(--text-empty)', textAlign: 'center', padding: 20 }}>No resumes uploaded yet.</div>
+          )}
+          {resumes.map((r) => (
+            <div key={r.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
+                  {r.label} {r.is_default ? '• Default' : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.filename}</div>
+              </div>
+              <button onClick={() => onScoreResume(r.id)} style={{ border: 'none', background: '#8839ef', color: '#fff', borderRadius: 6, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}>Score All</button>
+              {!r.is_default && <button disabled={busyId === r.id} onClick={() => setDefaultResume(r.id)} style={{ border: 'none', background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', borderRadius: 6, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}>Set Default</button>}
+              <button disabled={busyId === r.id} onClick={() => renameResume(r.id, r.label)} style={{ border: 'none', background: 'var(--bg-surface-alt)', color: 'var(--text-primary)', borderRadius: 6, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}>Rename</button>
+              <button disabled={busyId === r.id} onClick={() => deleteResume(r.id)} style={{ border: 'none', background: 'var(--bg-red)', color: 'var(--fg-red)', borderRadius: 6, padding: '6px 10px', fontSize: 11, cursor: 'pointer' }}>Delete</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('digest')
@@ -2162,7 +2373,8 @@ export default function App() {
   const [prefs, setPrefs] = useState({ keywords: [], company_allowlist: [], company_blocklist: [] })
   const [optimizeJob, setOptimizeJob] = useState(null)
   const [outreachJob, setOutreachJob] = useState(null)
-  const [resumeInfo, setResumeInfo] = useState(null) // { filename, uploadedAt }
+  const [resumes, setResumes] = useState([])
+  const [showResumeManager, setShowResumeManager] = useState(false)
   const [scoring, setScoring] = useState(false)
   const [scoreMsg, setScoreMsg] = useState('')
   const [followUpCount, setFollowUpCount] = useState(0)
@@ -2227,18 +2439,22 @@ export default function App() {
     } catch { /* ignore */ }
   }, [])
 
-  const fetchResume = useCallback(async () => {
-    const res = await fetch(`${API}/api/resume`)
-    const data = await res.json()
-    if (data.uploaded) setResumeInfo({ filename: data.filename, uploadedAt: data.uploadedAt })
+  const fetchResumes = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/resumes`)
+      const data = await res.json()
+      setResumes(data.resumes || [])
+    } catch {
+      setResumes([])
+    }
   }, [])
 
   useEffect(() => {
     fetchPrefs()
-    fetchResume()
+    fetchResumes()
     fetchFollowUpCount()
     fetchQueueCount()
-  }, [fetchPrefs, fetchResume, fetchFollowUpCount, fetchQueueCount])
+  }, [fetchPrefs, fetchResumes, fetchFollowUpCount, fetchQueueCount])
 
   useEffect(() => {
     if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue' || tab === 'storybank' || tab === 'analytics') return
@@ -2274,36 +2490,17 @@ export default function App() {
 
   async function handleCollect() {
     setCollecting(true)
-    await fetch(`${API}/api/collect?hours=48`, { method: 'POST' })
+    const hours = Number.parseInt(filters.hours || '48', 10)
+    const safeHours = Number.isFinite(hours) && hours > 0 ? hours : 48
+    await fetch(`${API}/api/collect?hours=${safeHours}`, { method: 'POST' })
   }
 
-
-  async function handleGlobalResumeUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const res = await fetch(`${API}/api/resume/upload`, { method: 'POST', body: formData })
-      const data = await res.json()
-      if (data.ok) {
-        setResumeInfo({ filename: data.filename, uploadedAt: new Date().toISOString() })
-        // Auto-trigger batch scoring
-        handleScoreAll()
-      } else {
-        alert(data.error || 'Upload failed')
-      }
-    } catch {
-      alert('Upload failed')
-    }
-    e.target.value = '' // reset input
-  }
-
-  async function handleScoreAll() {
+  async function handleScoreAll(resumeId) {
     setScoring(true)
     setScoreMsg('Scoring all jobs...')
     try {
-      const res = await fetch(`${API}/api/resume/score-all`, { method: 'POST' })
+      const endpoint = resumeId ? `${API}/api/resumes/${resumeId}/score-all` : `${API}/api/resume/score-all`
+      const res = await fetch(endpoint, { method: 'POST' })
       const data = await res.json()
       if (data.ok) {
         setScoreMsg(`Scored ${data.scored} jobs (${data.skipped} skipped)`)
@@ -2312,6 +2509,7 @@ export default function App() {
         // Refresh current view
         const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
         fetchJobs(filters, offset, statusOverride)
+        fetchResumes()
       } else {
         setScoreMsg(data.error || 'Scoring failed')
       }
@@ -2342,7 +2540,8 @@ export default function App() {
       fetchQueueCount()
     } catch {
       // Rollback - restore previous status (we don't know exact prev status, so refetch)
-      fetchJobs()
+      const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
+      fetchJobs(filters, offset, statusOverride)
       fetchQueueCount()
     }
   }
@@ -2371,26 +2570,21 @@ export default function App() {
       }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-link)' }}>🎯 Job Tracker</div>
         <div style={{ flex: 1 }} />
-        {/* Global Resume Upload */}
-        <label style={{
-          background: resumeInfo ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
-          color: resumeInfo ? 'var(--fg-green)' : 'var(--text-primary)',
+        {/* Resume Manager */}
+        <button
+          onClick={() => setShowResumeManager(true)}
+          style={{
+          background: resumes.length > 0 ? 'var(--bg-green)' : 'var(--bg-surface-alt)',
+          color: resumes.length > 0 ? 'var(--fg-green)' : 'var(--text-primary)',
           border: 'none', borderRadius: 8,
           padding: '6px 14px', fontSize: 12, fontWeight: 600,
-          cursor: scoring ? 'not-allowed' : 'pointer',
+          cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 6,
-          opacity: scoring ? 0.6 : 1,
+          opacity: 1,
         }}>
-          📄 {resumeInfo ? resumeInfo.filename : 'Upload Resume'}
-          <input
-            type="file"
-            accept=".pdf,.txt,.tex"
-            onChange={handleGlobalResumeUpload}
-            disabled={scoring}
-            style={{ display: 'none' }}
-          />
-        </label>
-        {resumeInfo && (
+          📄 {resumes.length > 0 ? `Resumes (${resumes.length})` : 'Add Resumes'}
+        </button>
+        {resumes.length > 0 && (
           <button
             onClick={handleScoreAll}
             disabled={scoring}
@@ -2660,6 +2854,15 @@ export default function App() {
       {/* Resume Optimizer Modal */}
       {optimizeJob && (
         <ResumeOptimizer job={optimizeJob} onClose={() => setOptimizeJob(null)} />
+      )}
+
+      {showResumeManager && (
+        <ResumeManagerModal
+          resumes={resumes}
+          onClose={() => setShowResumeManager(false)}
+          onUpdated={fetchResumes}
+          onScoreResume={(id) => handleScoreAll(id)}
+        />
       )}
 
       {/* Cold Outreach Modal */}

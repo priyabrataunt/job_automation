@@ -137,6 +137,8 @@ function ResumeUpload({ onUploaded, currentFile }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function ResumeOptimizer({ job, onClose }) {
   const [resumeFile, setResumeFile] = useState(null)
+  const [resumes, setResumes] = useState([])
+  const [selectedResumeId, setSelectedResumeId] = useState(null)
   const [result, setResult] = useState(null)
   const [scoring, setScoring] = useState(false)
   const [error, setError] = useState('')
@@ -150,14 +152,27 @@ export default function ResumeOptimizer({ job, onClose }) {
   useEffect(() => {
     async function check() {
       try {
-        const res = await fetch(`${API}/api/resume`)
-        const data = await res.json()
-        if (data.uploaded) setResumeFile(data.filename)
+        const [resumesRes, defaultRes] = await Promise.all([
+          fetch(`${API}/api/resumes`),
+          fetch(`${API}/api/resume`),
+        ])
+        const resumesData = await resumesRes.json()
+        const defaultData = await defaultRes.json()
+        const allResumes = resumesData.resumes || []
+        setResumes(allResumes)
+        if (defaultData.uploaded) setResumeFile(defaultData.filename)
+        if (job._preferredResumeId) {
+          setSelectedResumeId(job._preferredResumeId)
+        } else if (defaultData.resumeId) {
+          setSelectedResumeId(defaultData.resumeId)
+        } else if (allResumes.length > 0) {
+          setSelectedResumeId(allResumes[0].id)
+        }
       } catch { /* ignore */ }
       setLoadingResume(false)
     }
     check()
-  }, [])
+  }, [job._preferredResumeId])
 
   async function handleGenerateCoverLetter() {
     setGeneratingCL(true)
@@ -168,7 +183,7 @@ export default function ResumeOptimizer({ job, onClose }) {
       const res = await fetch(`${API}/api/cover-letter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: job.id }),
+        body: JSON.stringify({ jobId: job.id, resumeId: selectedResumeId || undefined }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
@@ -187,7 +202,7 @@ export default function ResumeOptimizer({ job, onClose }) {
       const res = await fetch(`${API}/api/resume/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: job.id }),
+        body: JSON.stringify({ jobId: job.id, resumeId: selectedResumeId || undefined }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scoring failed')
@@ -241,21 +256,57 @@ export default function ResumeOptimizer({ job, onClose }) {
           {/* Upload */}
           <ResumeUpload
             currentFile={resumeFile}
-            onUploaded={(name) => { setResumeFile(name); setResult(null) }}
+            onUploaded={async (name) => {
+              setResumeFile(name)
+              setResult(null)
+              try {
+                const resumesRes = await fetch(`${API}/api/resumes`)
+                const resumesData = await resumesRes.json()
+                const allResumes = resumesData.resumes || []
+                setResumes(allResumes)
+                if (!selectedResumeId && allResumes.length > 0) {
+                  const def = allResumes.find(r => r.is_default) || allResumes[0]
+                  setSelectedResumeId(def.id)
+                }
+              } catch { /* ignore */ }
+            }}
           />
 
           {/* Score button */}
           {resumeFile && (
-            <button
-              onClick={handleScore}
-              disabled={scoring}
-              style={{
-                background: scoring ? 'var(--bg-surface-alt)' : '#1e66f5', color: '#fff',
-                border: 'none', borderRadius: 10, padding: '12px 0',
-                fontWeight: 700, fontSize: 15, cursor: scoring ? 'not-allowed' : 'pointer',
-                width: '100%',
-              }}
-            >{scoring ? 'Scoring...' : 'Check ATS Score for This Job'}</button>
+            <>
+              {resumes.length > 0 && (
+                <select
+                  value={selectedResumeId || ''}
+                  onChange={(e) => setSelectedResumeId(Number(e.target.value))}
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg-surface-alt)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    color: 'var(--text-primary)',
+                    fontSize: 13,
+                  }}
+                >
+                  {resumes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label} ({r.filename}){r.is_default ? ' • Default' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={handleScore}
+                disabled={scoring}
+                style={{
+                  background: scoring ? 'var(--bg-surface-alt)' : '#1e66f5', color: '#fff',
+                  border: 'none', borderRadius: 10, padding: '12px 0',
+                  fontWeight: 700, fontSize: 15, cursor: scoring ? 'not-allowed' : 'pointer',
+                  width: '100%',
+                }}
+              >{scoring ? 'Scoring...' : 'Check ATS Score for This Job'}</button>
+            </>
           )}
 
           {error && (

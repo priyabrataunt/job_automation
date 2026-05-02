@@ -54,6 +54,23 @@ export interface PushSubscription {
   created_at: string;
 }
 
+export interface UserResume {
+  id: number;
+  label: string;
+  filename: string;
+  resume_text: string;
+  is_default: boolean;
+  uploaded_at: string;
+}
+
+export interface JobResumeScore {
+  job_id: number;
+  resume_id: number;
+  score: number;
+  details?: unknown;
+  scored_at: string;
+}
+
 export interface StoryBank {
   id?: number;
   title: string;
