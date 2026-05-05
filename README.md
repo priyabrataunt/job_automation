@@ -15,7 +15,7 @@
 
 ## ✨ What It Does
 
-Job Tracker automatically scrapes job postings from **Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, SimplifyJobs** (curated intern / new-grad listings), and **JSearch** on a schedule. On startup it runs a wider backfill; the cron job then pulls new posts every **6 hours**. It then:
+Job Tracker automatically scrapes job postings from **Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, SimplifyJobs, JobRight** (curated intern / new-grad listings), and **JSearch** on a schedule. On startup it runs a wider backfill; the cron job then pulls new posts every **6 hours**. It then:
 
 - **Filters** for entry-level, junior, internship, and co-op software engineering roles
 - **Scores** each posting against your custom keywords and company preferences

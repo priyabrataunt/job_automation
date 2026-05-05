@@ -5,6 +5,7 @@ import { collectWorkday } from './workday';
 import { collectSmartRecruiters } from './smartrecruiters';
 import { collectWorkable } from './workable';
 import { collectSimplifyJobs } from './simplifyjobs';
+import { collectJobRight } from './jobright';
 import { Job } from '../db/schema';
 
 export async function runAllCollectors(hoursBack: number): Promise<Job[]> {
@@ -18,10 +19,11 @@ export async function runAllCollectors(hoursBack: number): Promise<Job[]> {
     collectSmartRecruiters(hoursBack),
     collectWorkable(hoursBack),
     collectSimplifyJobs(hoursBack),
+    collectJobRight(hoursBack),
   ]);
 
   const allJobs: Job[] = [];
-  const names = ['Greenhouse', 'Ashby', 'Lever', 'Workday', 'SmartRecruiters', 'Workable', 'SimplifyJobs'];
+  const names = ['Greenhouse', 'Ashby', 'Lever', 'Workday', 'SmartRecruiters', 'Workable', 'SimplifyJobs', 'JobRight'];
 
   results.forEach((result, i) => {
     if (result.status === 'fulfilled') {
