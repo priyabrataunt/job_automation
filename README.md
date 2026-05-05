@@ -96,6 +96,8 @@ npm run dev
 
 The backend initializes database tables if needed, runs an initial collection (48-hour lookback), and the scheduler repeats collection every 6 hours (8-hour window per run) plus hourly cleanup of stale rows.
 
+To proactively audit ATS slugs/endpoints before a scrape, run `cd backend && npm run health:ats`.
+
 ---
 
 ## ⚙️ Environment Variables

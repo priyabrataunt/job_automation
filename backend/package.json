@@ -7,7 +7,8 @@
     "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "migrate:sqlite-to-neon": "ts-node src/db/migrate-sqlite-to-neon.ts"
+    "migrate:sqlite-to-neon": "ts-node src/db/migrate-sqlite-to-neon.ts",
+    "health:ats": "ts-node src/scripts/ats-health-check.ts"
   },
   "keywords": [],
   "author": "",
