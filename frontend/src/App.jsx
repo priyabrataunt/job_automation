@@ -1711,7 +1711,7 @@ function DigestView({ onStatusChange, onOptimize, onQueue, onOutreach }) {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
-  const [hours, setHours] = useState('48')
+  const [hours, setHours] = useState('24')
   const [lastScan, setLastScan] = useState(null)
 
   const load = useCallback(async (scanHours) => {
@@ -1761,8 +1761,6 @@ function DigestView({ onStatusChange, onOptimize, onQueue, onOutreach }) {
         >
           <option value="6">Last 6h</option>
           <option value="24">Last 24h</option>
-          <option value="48">Last 48h</option>
-          <option value="168">Last 7d</option>
         </select>
         <button
           onClick={async () => {

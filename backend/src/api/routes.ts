@@ -3,6 +3,7 @@ import db from '../db/database';
 import { runCollection, isCollectionRunning } from '../orchestrator';
 import { getPreferences, rescoreAllJobs } from '../scoring';
 import { scoreResume, recencyMultiplier } from '../resume';
+import { parseExperienceYears } from '../collectors/filters';
 import { PDFParse } from 'pdf-parse';
 import axios from 'axios';
 import OpenAI from 'openai';
@@ -253,6 +254,10 @@ function getFullJobDescription(job: any): string {
     if (typeof description !== 'string') return '';
     return description;
 }
+function isPhdFocusedRole(title: string, description: string): boolean {
+    const text = `${title || ''} ${description || ''}`.toLowerCase();
+    return /\bph\.?\s?d\b|\bdoctorate\b|\bdoctoral\b/.test(text);
+}
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // GET /api/jobs
     app.get('/api/jobs', async (request, reply) => {
@@ -453,8 +458,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
     // POST /api/priority-scan — rank top jobs across all resumes
     app.post('/api/priority-scan', async (request, reply) => {
-        const { hours = '48', limit = '15' } = request.query as Record<string, string>;
-        const hoursBack = Math.max(1, parseInt(hours) || 48);
+        const { hours = '24', limit = '15' } = request.query as Record<string, string>;
+        const requestedHours = parseInt(hours);
+        const hoursBack = requestedHours === 6 || requestedHours === 24 ? requestedHours : 24;
         const lim = Math.min(Math.max(1, parseInt(limit) || 15), 50);
         const resumes = await listStoredResumes();
         if (!resumes.length) {
@@ -464,11 +470,19 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
         const jobs = await db.prepare(
             `SELECT id, title, company, location, posted_at, status, apply_url, ats_source, description_snippet, raw_json,
-                    opt_friendly, sponsor_tier, visa_signal
+                    opt_friendly, max_experience_years
              FROM jobs
              WHERE is_us_job(location) = 1
                AND posted_at >= ?
                AND status IN ('new', 'saved', 'queued')
+               AND (max_experience_years IS NULL OR max_experience_years <= 3)
+               AND COALESCE(title, '') !~* '(\\mph\\.?\\s?d\\M|\\mdoctorate\\M|\\mdoctoral\\M)'
+               AND COALESCE(description_snippet, '') !~* '(\\mph\\.?\\s?d\\M|\\mdoctorate\\M|\\mdoctoral\\M)'
+               AND (
+                 job_type IN ('internship', 'coop')
+                 OR is_entry_title(title) = 1
+                 OR (max_experience_years IS NOT NULL AND max_experience_years <= 3)
+               )
              ORDER BY posted_at DESC`
         ).all(cutoff) as any[];
 
@@ -486,6 +500,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             details: any;
             description: string;
         }>>();
+        let eligibleJobCount = 0;
 
         await runWithConcurrency(jobs, 5, async (job) => {
             let description = getFullJobDescription(job);
@@ -494,6 +509,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
                 if (wdDesc) description = wdDesc;
             }
             if (!description) return;
+            if (isPhdFocusedRole(job.title || '', description)) return;
+            const parsedYears = parseExperienceYears(`${job.title || ''} ${description}`);
+            const requiredYears = Math.max(job.max_experience_years ?? -1, parsedYears ?? -1);
+            if (requiredYears >= 4) return;
+            eligibleJobCount++;
 
             const daysPosted = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / (1000 * 60 * 60 * 24));
             const recency = recencyMultiplier(daysPosted);
@@ -554,16 +574,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
                 const daysPosted = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / (1000 * 60 * 60 * 24));
                 const recency = recencyMultiplier(daysPosted);
                 const optBoost = job.opt_friendly ? 1.10 : 1.0;
-                const sponsorBoost = ['high', 'medium'].includes((job.sponsor_tier || '').toLowerCase()) ? 1.10 : 1.0;
-                const visaPenalty = job.visa_signal === 0 ? 0.5 : 1.0;
-                const titleBoost = /\b(intern|internship|co-?op|junior|entry|new grad|graduate|associate)\b/i.test(job.title || '') ? 1.05 : 1.0;
-                const priority = Math.round(best.raw_score * recency * optBoost * sponsorBoost * visaPenalty * titleBoost);
+                const priority = Math.round(best.raw_score * recency * optBoost);
 
                 const why: string[] = [];
                 why.push(`${best.raw_score}% resume match (${best.resume_label})`);
                 if (job.opt_friendly) why.push('OPT friendly');
-                if (job.sponsor_tier) why.push(`Sponsor tier: ${job.sponsor_tier}`);
-                if (job.visa_signal === 0) why.push('No-sponsor language detected');
                 why.push(`Posted ${Math.max(0, daysPosted)}d ago`);
 
                 return {
@@ -584,7 +599,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         await db.prepare(
             `INSERT INTO priority_scan_runs (scanned_at, hours, limit_count, total_jobs_considered)
              VALUES (NOW(), ?, ?, ?)`
-        ).run(hoursBack, lim, jobs.length);
+        ).run(hoursBack, lim, eligibleJobCount);
 
         const lastScan = await db.prepare(
             `SELECT scanned_at, hours, limit_count, total_jobs_considered
@@ -595,7 +610,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
         return reply.send({
             jobs: ranked,
-            total_considered: jobs.length,
+            total_considered: eligibleJobCount,
             resumes_used: resumes.length,
             last_scan: lastScan,
         });
