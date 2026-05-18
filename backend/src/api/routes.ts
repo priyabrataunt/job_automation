@@ -359,7 +359,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         // Phase 2: fuzzy (normalized title + company)
         if (title && company) {
             const normTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-            const normCompany = company.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            const normCompany = company.toLowerCase().replace(/[-_.]+/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!normTitle || !normCompany) {
+                return reply.send({ match: false, matchType: null, job: null });
+            }
             const rows = await db.prepare(
                 `SELECT id, title, company, status, apply_url, status_updated_at FROM jobs
                  WHERE LOWER(REPLACE(REPLACE(REPLACE(company, '-', ' '), '_', ' '), '.', ' ')) LIKE ?
