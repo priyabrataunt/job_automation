@@ -879,9 +879,12 @@ function watchForSubmission(baseUrl) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXTRACT_JOB') {
-    const data = typeof extractJobFromCurrentPage === 'function'
-      ? extractJobFromCurrentPage()
-      : null;
+    let data = null;
+    try {
+      if (typeof extractJobFromCurrentPage === 'function') {
+        data = extractJobFromCurrentPage();
+      }
+    } catch { /* ignore extraction errors */ }
     sendResponse(data);
     return;
   }

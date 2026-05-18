@@ -1,6 +1,6 @@
 // Background service worker — handles message routing, proxied fetch, and side panel
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.warn);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_PROFILE') {
@@ -10,6 +10,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // Proxy fetch requests from content script → backend (avoids mixed content block
+  // when content script runs on https:// pages but backend is http://localhost).
   if (message.type === 'FETCH_PROXY') {
     const { url, options } = message;
     fetch(url, {

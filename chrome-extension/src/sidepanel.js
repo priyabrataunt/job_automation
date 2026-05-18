@@ -557,7 +557,7 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     $('dedup-title').textContent = job.status === 'applied'
       ? 'Already Applied'
       : 'Already in Tracker';
-    $('dedup-detail').innerHTML = `You ${job.status === 'applied' ? 'applied to' : 'tracked'} <strong>${escapeHtml(job.title)}</strong> at <strong>${escapeHtml(job.company)}</strong> on ${date}.`
+    $('dedup-detail').innerHTML = `You ${job.status === 'applied' ? 'applied to' : 'tracked'} <strong>${escapeHtml(job.title)}</strong> at <strong>${escapeHtml(job.company)}</strong> on ${escapeHtml(date)}.`
       + ` <a href="${escapeHtml(getTrackerBaseUrl(profile))}" target="_blank">Open Dashboard</a>`;
   }
 
