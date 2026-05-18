@@ -1,19 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Job Tracker Auto-Fill",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Auto-fills job applications using your profile and generates cover letters with Claude AI.",
   "permissions": [
     "activeTab",
     "storage",
-    "clipboardWrite"
+    "clipboardWrite",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>",
     "http://localhost:8000/*"
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Job Tracker Auto-Fill"
   },
   "background": {
@@ -22,7 +25,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "js": ["src/extractors.js", "src/content.js"],
       "run_at": "document_idle"
     }
   ]

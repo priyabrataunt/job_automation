@@ -1,6 +1,6 @@
-// Background service worker — handles message routing & proxied fetch requests
-// Content scripts can't fetch http://localhost from https:// pages (mixed content).
-// All backend API calls must go through this service worker.
+// Background service worker — handles message routing, proxied fetch, and side panel
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_PROFILE') {
@@ -10,7 +10,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  // Proxy fetch requests from content script → backend (avoids mixed content block)
   if (message.type === 'FETCH_PROXY') {
     const { url, options } = message;
     fetch(url, {
@@ -25,6 +24,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((err) => {
         sendResponse({ ok: false, status: 0, body: '', error: err.message || String(err) });
       });
-    return true; // keep channel open for async response
+    return true;
   }
 });

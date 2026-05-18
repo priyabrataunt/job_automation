@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Job Tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #11111b;
+      color: #cdd6f4;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+    .header {
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header h1 { font-size: 16px; font-weight: 700; color: #89b4fa; }
+    .header .subtitle { font-size: 11px; color: #6c7086; margin-top: 2px; }
+    .body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .section {
+      background: #1e1e2e;
+      border: 1px solid #313244;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #a6adc8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    .btn {
+      width: 100%;
+      padding: 9px 0;
+      border: none;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #1e66f5; color: #fff; }
+    .btn-purple  { background: #8839ef; color: #fff; }
+    .btn-green   { background: #40a02b; color: #fff; }
+    .btn-subtle  { background: #313244; color: #cdd6f4; }
+    .btn-save    { background: #df8e1d; color: #fff; }
+    .btn + .btn  { margin-top: 6px; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .badge-blue   { background: #1e3a5f; color: #89b4fa; }
+    .badge-green  { background: #1e4620; color: #a6e3a1; }
+    .badge-yellow { background: #3b2c00; color: #f9e2af; }
+    #cl-output {
+      width: 100%;
+      min-height: 120px;
+      background: #181825;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-size: 11px;
+      line-height: 1.6;
+      padding: 10px;
+      resize: vertical;
+      margin-top: 8px;
+      font-family: system-ui, sans-serif;
+    }
+    #msg { font-size: 11px; color: #a6e3a1; min-height: 16px; text-align: center; }
+    #err { font-size: 11px; color: #f38ba8; min-height: 16px; text-align: center; }
+    .field-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .field-tag {
+      background: #1e4620; color: #a6e3a1;
+      font-size: 10px; padding: 2px 7px; border-radius: 4px;
+    }
+    .field-tag.ai { background: #1e3a5f; color: #89b4fa; }
+    #jd-text {
+      width: 100%;
+      min-height: 100px;
+      background: #181825;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-size: 11px;
+      line-height: 1.6;
+      padding: 10px;
+      resize: vertical;
+      font-family: system-ui, sans-serif;
+      margin-top: 8px;
+    }
+    .section-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #jd-toggle { cursor: pointer; font-size: 11px; color: #89b4fa; font-weight: 600; }
+    #jd-badge { display: none; align-items: center; gap: 6px; margin-top: 8px; }
+    #jd-clear { cursor: pointer; font-size: 10px; color: #f38ba8; font-weight: 600; }
+    #jd-clear:hover { text-decoration: underline; }
+    .queue-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 0; border-bottom: 1px solid #313244; gap: 8px;
+    }
+    .queue-item:last-child { border-bottom: none; }
+    .queue-item-text { flex: 1; min-width: 0; }
+    .queue-item-title { font-size: 12px; font-weight: 600; color: #cdd6f4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .queue-item-company { font-size: 10px; color: #a6adc8; }
+    .btn-open { padding: 4px 10px; font-size: 11px; white-space: nowrap; background: #1e66f5; color: #fff; border: none; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
+    .dedup-banner {
+      display: none;
+      background: #3b2c00;
+      border: 1px solid #df8e1d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #f9e2af;
+      line-height: 1.5;
+    }
+    .dedup-banner a { color: #89b4fa; text-decoration: underline; }
+    .dedup-banner .dedup-title { font-weight: 700; margin-bottom: 4px; }
+    .extracted-info { font-size: 12px; line-height: 1.6; }
+    .extracted-info .info-row { display: flex; gap: 6px; margin-bottom: 4px; }
+    .extracted-info .info-label { color: #6c7086; min-width: 70px; flex-shrink: 0; }
+    .extracted-info .info-value { color: #cdd6f4; word-break: break-word; }
+    .extracted-info .info-value.muted { color: #6c7086; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Job Tracker</h1>
+      <div class="subtitle" id="page-ats">Detecting page...</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="dedup-banner" id="dedup-banner">
+      <div class="dedup-title" id="dedup-title"></div>
+      <div id="dedup-detail"></div>
+    </div>
+
+    <div class="section" id="extracted-section" style="display:none">
+      <div class="section-title">Job Info (from page)</div>
+      <div class="extracted-info" id="extracted-info"></div>
+      <button class="btn btn-save" id="btn-save-tracker" style="margin-top:8px">Save to Tracker</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Page Detection</div>
+      <div class="status-row">
+        <div class="dot" id="ats-dot" style="background:#45475a"></div>
+        <span id="ats-label">Scanning...</span>
+      </div>
+      <div id="field-summary" class="field-list" style="margin-top:8px;display:none"></div>
+    </div>
+
+    <div class="section" id="assisted-queue-section">
+      <div class="section-title">Assisted Queue</div>
+      <div id="assisted-queue-list">
+        <div style="color:#6c7086;font-size:11px;text-align:center;padding:8px 0">Loading...</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title-row">
+        <div class="section-title" style="margin-bottom:0">Job Context</div>
+        <span id="jd-toggle">Paste JD</span>
+      </div>
+      <div id="jd-badge">
+        <span class="badge badge-green" id="jd-badge-text">JD loaded</span>
+        <span id="jd-clear">Clear</span>
+      </div>
+      <div id="jd-input-area" style="display:none">
+        <textarea id="jd-text" placeholder="Paste job description here..."></textarea>
+        <button class="btn btn-subtle" id="btn-add-tracker" style="margin-top:6px" disabled>Add to Tracker</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Auto-Fill</div>
+      <button class="btn btn-primary" id="btn-autofill">Auto-Fill This Form</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Cover Letter</div>
+      <button class="btn btn-purple" id="btn-coverletter">Generate Cover Letter</button>
+      <textarea id="cl-output" placeholder="Generated cover letter will appear here..." style="display:none"></textarea>
+      <button class="btn btn-subtle" id="btn-copy" style="display:none;margin-top:6px">Copy to Clipboard</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Track Application</div>
+      <button class="btn btn-green" id="btn-applied">Mark as Applied</button>
+    </div>
+
+    <div id="msg"></div>
+    <div id="err"></div>
+  </div>
+
+  <script src="src/sidepanel.js"></script>
+</body>
+</html>
