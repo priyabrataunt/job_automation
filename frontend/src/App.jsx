@@ -2396,10 +2396,11 @@ export default function App() {
     junior_only: '',
   })
 
-  const fetchJobs = useCallback(async (currentFilters, currentOffset, statusOverride) => {
+  const fetchJobs = useCallback(async (currentFilters, currentOffset, statusOverride, excludeStatus) => {
     const params = new URLSearchParams()
     Object.entries(currentFilters).forEach(([k, v]) => { if (v !== '') params.set(k, v) })
     if (statusOverride) params.set('status', statusOverride)
+    if (excludeStatus) params.set('exclude_status', excludeStatus)
     params.set('limit', LIMIT)
     params.set('offset', currentOffset)
     const res = await fetch(`${API}/api/jobs?${params}`)
@@ -2458,7 +2459,8 @@ export default function App() {
     if (tab === 'digest' || tab === 'prefs' || tab === 'followup' || tab === 'history' || tab === 'queue' || tab === 'storybank' || tab === 'analytics') return
     const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
     const activeFilters = tab === 'applied' ? { search: '', status: '', ats_source: '', job_type: '', remote: '', hours: '', sort: '', junior_only: '' } : filters
-    fetchJobs(activeFilters, offset, statusOverride)
+    const excludeApplied = (tab === 'all' && !filters.status) ? 'applied' : undefined
+    fetchJobs(activeFilters, offset, statusOverride, excludeApplied)
     fetchStats()
   }, [tab, filters, offset, fetchJobs, fetchStats])
 
@@ -2475,7 +2477,8 @@ export default function App() {
       if (!data.running) {
         setCollecting(false)
         const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
-        fetchJobs(filters, offset, statusOverride)
+        const excludeApplied = (tab === 'all' && !filters.status) ? 'applied' : undefined
+        fetchJobs(filters, offset, statusOverride, excludeApplied)
         fetchStats()
         fetchFollowUpCount()
         fetchQueueCount()
@@ -2506,7 +2509,8 @@ export default function App() {
         await fetch(`${API}/api/visa-scan`, { method: 'POST' }).catch(() => {})
         // Refresh current view
         const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
-        fetchJobs(filters, offset, statusOverride)
+        const excludeApplied = (tab === 'all' && !filters.status) ? 'applied' : undefined
+        fetchJobs(filters, offset, statusOverride, excludeApplied)
         fetchResumes()
       } else {
         setScoreMsg(data.error || 'Scoring failed')
@@ -2539,7 +2543,8 @@ export default function App() {
     } catch {
       // Rollback - restore previous status (we don't know exact prev status, so refetch)
       const statusOverride = tab === 'saved' ? 'saved' : tab === 'applied' ? 'applied' : undefined
-      fetchJobs(filters, offset, statusOverride)
+      const excludeApplied = (tab === 'all' && !filters.status) ? 'applied' : undefined
+      fetchJobs(filters, offset, statusOverride, excludeApplied)
       fetchQueueCount()
     }
   }
