@@ -261,12 +261,16 @@ function isPhdFocusedRole(title: string, description: string): boolean {
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // GET /api/jobs
     app.get('/api/jobs', async (request, reply) => {
-        const { status, ats_source, job_type, remote, search, hours, sort, entry_only, junior_only, limit = '50', offset = '0', } = request.query as Record<string, string>;
+        const { status, exclude_status, ats_source, job_type, remote, search, hours, sort, entry_only, junior_only, limit = '50', offset = '0', } = request.query as Record<string, string>;
         const conditions: string[] = ['(is_us_job(location) = 1 OR ats_source = \'manual\')'];
         const params: any[] = [];
         if (status) {
             conditions.push('status = ?');
             params.push(status);
+        }
+        if (exclude_status && !status) {
+            conditions.push('status != ?');
+            params.push(exclude_status);
         }
         if (ats_source) {
             conditions.push('ats_source = ?');
@@ -334,6 +338,45 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     `).run(externalId, title.trim(), company.trim(), location?.trim() || '', apply_url?.trim() || '', safeJobType, snippet, raw_json?.trim() || '{}');
         const job = await db.prepare('SELECT * FROM jobs WHERE id = ?').get(result.lastInsertRowid) as any;
         return reply.code(201).send({ job });
+    });
+    // GET /api/jobs/dedup-check — check if a job already exists in the tracker
+    app.get('/api/jobs/dedup-check', async (request, reply) => {
+        const { url, title, company } = request.query as { url?: string; title?: string; company?: string };
+        if (!url && !title) {
+            return reply.code(400).send({ error: 'Provide url and/or title+company' });
+        }
+
+        // Phase 1: exact URL match
+        if (url) {
+            const row = await db.prepare(
+                `SELECT id, title, company, status, apply_url, status_updated_at FROM jobs WHERE apply_url = ? LIMIT 1`
+            ).get(url) as any;
+            if (row) {
+                return reply.send({ match: true, matchType: 'url', job: row });
+            }
+        }
+
+        // Phase 2: fuzzy (normalized title + company)
+        if (title && company) {
+            const normTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            const normCompany = company.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            const rows = await db.prepare(
+                `SELECT id, title, company, status, apply_url, status_updated_at FROM jobs
+                 WHERE LOWER(REPLACE(REPLACE(REPLACE(company, '-', ' '), '_', ' '), '.', ' ')) LIKE ?
+                 LIMIT 50`
+            ).all(`%${normCompany}%`) as any[];
+
+            for (const row of rows) {
+                const rowTitle = (row.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+                const words = normTitle.split(/\s+/).filter((w: string) => w.length > 2);
+                const matched = words.filter((w: string) => rowTitle.includes(w));
+                if (words.length > 0 && matched.length / words.length >= 0.6) {
+                    return reply.send({ match: true, matchType: 'fuzzy', job: row });
+                }
+            }
+        }
+
+        return reply.send({ match: false, matchType: null, job: null });
     });
     // PATCH /api/jobs/:id/status
     app.patch('/api/jobs/:id/status', async (request, reply) => {
