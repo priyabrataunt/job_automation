@@ -878,6 +878,14 @@ function watchForSubmission(baseUrl) {
 // ── Message listener (from popup) ────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'EXTRACT_JOB') {
+    const data = typeof extractJobFromCurrentPage === 'function'
+      ? extractJobFromCurrentPage()
+      : null;
+    sendResponse(data);
+    return;
+  }
+
   if (message.type === 'DETECT') {
     const ats = detectATS();
     const inputCount = document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file]), textarea, select').length;
