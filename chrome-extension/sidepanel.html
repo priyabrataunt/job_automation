@@ -149,6 +149,15 @@
     .extracted-info .info-label { color: #6c7086; min-width: 70px; flex-shrink: 0; }
     .extracted-info .info-value { color: #cdd6f4; word-break: break-word; }
     .extracted-info .info-value.muted { color: #6c7086; font-style: italic; }
+    .rescan-link {
+      margin-left: auto;
+      cursor: pointer;
+      font-size: 10px;
+      color: #89b4fa;
+      font-weight: 600;
+      user-select: none;
+    }
+    .rescan-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -176,6 +185,7 @@
       <div class="status-row">
         <div class="dot" id="ats-dot" style="background:#45475a"></div>
         <span id="ats-label">Scanning...</span>
+        <span class="rescan-link" id="btn-rescan" title="Re-scan this page for form fields">↻ Rescan</span>
       </div>
       <div id="field-summary" class="field-list" style="margin-top:8px;display:none"></div>
     </div>

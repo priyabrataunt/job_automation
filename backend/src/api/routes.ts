@@ -113,13 +113,34 @@ async function buildAiFillPrompt(
     messages.push({ role: 'user', content: prompt });
     const completion = await client.chat.completions.create({
         model,
-        max_tokens: model === 'gpt-5.1' ? 1200 : 800,
+        // GPT-5 reasoning tokens count against this budget; pad generously.
+        max_completion_tokens: model === 'gpt-5.1' ? 4000 : 2000,
+        // Form-fill is a lookup task — no chain-of-thought needed. Without
+        // this, reasoning tokens consume the entire budget and content is "".
+        reasoning_effort: 'minimal',
         response_format: { type: 'json_object' },
         messages,
-    });
-    const raw = completion.choices[0]?.message?.content || '{}';
-    const parsed = JSON.parse(raw);
-    return parsed.answers || {};
+    } as any);
+    const choice = completion.choices[0];
+    const raw = choice?.message?.content || '';
+    const finishReason = choice?.finish_reason;
+    const usage: any = completion.usage || {};
+    const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens;
+    if (!raw || finishReason !== 'stop') {
+        console.warn('[ai-fill]', model, 'empty/truncated response', {
+            finishReason,
+            contentLength: raw.length,
+            reasoningTokens,
+            completionTokens: usage.completion_tokens,
+        });
+    }
+    try {
+        const parsed = JSON.parse(raw || '{}');
+        return parsed.answers || {};
+    } catch (parseErr) {
+        console.warn('[ai-fill]', model, 'JSON parse failed:', raw.slice(0, 200));
+        return {};
+    }
 }
 async function fetchWorkdayDescription(applyUrl: string): Promise<string> {
     try {
@@ -1087,7 +1108,7 @@ ${stripHtml(description).slice(0, 3000)}
         messages.push({ role: 'user', content: prompt });
         const completion = await client.chat.completions.create({
             model: 'gpt-5',
-            max_tokens: 600,
+            max_completion_tokens: 600,
             messages,
         });
         const text = completion.choices[0]?.message?.content || '';
@@ -1118,7 +1139,7 @@ ${stripHtml(description).slice(0, 3000)}
         const client = new OpenAI({ apiKey });
         const extraction = await client.chat.completions.create({
             model: 'gpt-5',
-            max_tokens: 200,
+            max_completion_tokens: 200,
             response_format: { type: 'json_object' },
             messages: [{
                     role: 'user',
@@ -1291,7 +1312,7 @@ Guidelines:
             followUpMessages.push({ role: 'user', content: prompt });
             const completion = await client.chat.completions.create({
                 model: 'gpt-5',
-                max_tokens: 200,
+                max_completion_tokens: 200,
                 messages: followUpMessages,
             });
             const text = completion.choices[0]?.message?.content || '';

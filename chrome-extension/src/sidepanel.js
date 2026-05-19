@@ -279,9 +279,9 @@ async function detectPage() {
 
   try {
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'DETECT' });
-    return { tab, ...response };
+    return { tab, ...response, ok: true };
   } catch {
-    return { tab, ats: 'Not a job page', inputCount: 0, url: tab.url };
+    return { tab, ats: 'Not a job page', inputCount: 0, url: tab.url, ok: false };
   }
 }
 
@@ -561,7 +561,8 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
       + ` <a href="${escapeHtml(getTrackerBaseUrl(profile))}" target="_blank">Open Dashboard</a>`;
   }
 
-  const page = await detectPage();
+  let page = await detectPage();
+  let isJobPage = (page?.inputCount || 0) > 0;
 
   // ── Run extraction + dedup ──────────────────────────────────────────────────
   const extracted = await extractJobFromPage();
@@ -599,17 +600,50 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     }
   });
 
-  const ats = page?.ats || 'Unknown';
-  const inputCount = page?.inputCount || 0;
-  const isJobPage = inputCount > 0;
+  function applyDetection() {
+    const ats = page?.ats || 'Unknown';
+    const inputCount = page?.inputCount || 0;
+    isJobPage = inputCount > 0;
 
-  $('page-ats').textContent = page?.url?.slice(0, 50) || '';
-  const atsLabel = ats !== 'Unknown' ? `${ats} — ${inputCount} fields detected` : `${inputCount} fields detected`;
-  $('ats-label').textContent = isJobPage ? atsLabel : 'No form fields found on this page';
-  setDot(isJobPage ? '#40a02b' : '#df8e1d');
+    $('page-ats').textContent = page?.url?.slice(0, 50) || '';
+    const atsLabel = ats !== 'Unknown' ? `${ats} — ${inputCount} fields detected` : `${inputCount} fields detected`;
+    $('ats-label').textContent = isJobPage ? atsLabel : 'No form fields found on this page';
+    setDot(isJobPage ? '#40a02b' : '#df8e1d');
+  }
+
+  async function refreshDetection() {
+    const fresh = await detectPage();
+    if (!fresh) return;
+    // Ignore transient messaging failures once we've had a successful read
+    if (!fresh.ok && page?.ok) return;
+    page = fresh;
+    applyDetection();
+  }
+
+  applyDetection();
+
+  // Manual re-scan
+  $('btn-rescan').addEventListener('click', () => { refreshDetection().catch(() => {}); });
+
+  // Re-detect when the active tab navigates (SPA pushState fires onUpdated with changeInfo.url)
+  const tabUpdateListener = (_tabId, changeInfo) => {
+    if (!changeInfo.url && changeInfo.status !== 'complete') return;
+    refreshDetection().catch(() => {});
+  };
+  chrome.tabs.onUpdated.addListener(tabUpdateListener);
+
+  // Poll while the side panel is visible — catches DOM-only changes (tab switches, modals)
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refreshDetection().catch(() => {});
+    }
+  }, 1500);
 
   // ── Auto-fill button ──
   $('btn-autofill').addEventListener('click', async () => {
+    // Defense-in-depth: re-scan right before filling so SPA tab switches
+    // (Overview -> Application on Ashby, etc.) don't leave us with stale state.
+    await refreshDetection();
     if (!isJobPage) { showMsg('Navigate to a job application page first.', true); return; }
     $('btn-autofill').disabled = true;
     $('btn-autofill').textContent = 'Phase 1: Filling known fields...';
