@@ -162,6 +162,38 @@ function buildDescriptionSnippet(text) {
   return normalized.slice(0, 500);
 }
 
+function normalizeJobType(value) {
+  const lower = String(value || '').toLowerCase().trim();
+  if (!lower) return '';
+  if (lower.includes('intern')) return 'internship';
+  if (lower.includes('coop') || lower.includes('co-op')) return 'coop';
+  if (lower.includes('full')) return 'fulltime';
+  if (lower.includes('contract')) return 'contract';
+  if (lower.includes('part')) return 'parttime';
+  return '';
+}
+
+function inferSourceFromUrl(url) {
+  try {
+    return new URL(url).hostname || 'manual';
+  } catch {
+    return 'manual';
+  }
+}
+
+function toEditableExtracted(extracted, page) {
+  const pageUrl = extracted?.url || page?.url || '';
+  return {
+    title: extracted?.title || '',
+    company: extracted?.company || '',
+    location: extracted?.location || '',
+    jobType: normalizeJobType(extracted?.jobType),
+    description: extracted?.description || '',
+    url: pageUrl,
+    source: extracted?.source || inferSourceFromUrl(pageUrl),
+  };
+}
+
 function buildJobPayload(page, jdState = {}) {
   const context = getPageContext(page);
   const title = jdState.jdTitle || context.inferredTitle || 'External application';
@@ -523,24 +555,88 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     }
   }
 
+  const TYPE_LABELS = { fulltime: 'Full-time', internship: 'Internship', coop: 'Co-op', contract: 'Contract', parttime: 'Part-time' };
+
+  function renderField(row, key, label, extracted, syncState) {
+    const detected = extracted[key];
+    if (detected) {
+      const span = document.createElement('span');
+      span.className = 'info-value';
+      span.textContent = key === 'jobType' ? (TYPE_LABELS[detected] || detected) : detected;
+      row.appendChild(span);
+    } else {
+      const muted = document.createElement('span');
+      muted.className = 'info-value muted';
+      muted.textContent = 'Not detected — click to edit';
+      muted.addEventListener('click', () => {
+        replaceWithInput(row, key, label, extracted, syncState);
+      });
+      row.appendChild(muted);
+    }
+  }
+
+  function replaceWithInput(row, key, label, extracted, syncState) {
+    const existing = row.querySelector('.info-value, .info-input');
+    if (existing) existing.remove();
+
+    if (key === 'jobType') {
+      const select = document.createElement('select');
+      select.className = 'info-input';
+      [['', 'Select type'], ['fulltime', 'Full-time'], ['internship', 'Internship'], ['coop', 'Co-op'], ['contract', 'Contract'], ['parttime', 'Part-time']].forEach(([v, t]) => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = t;
+        select.appendChild(opt);
+      });
+      select.value = normalizeJobType(extracted[key]);
+      select.addEventListener('change', () => { extracted[key] = normalizeJobType(select.value); syncState(); });
+      row.appendChild(select);
+      select.focus();
+    } else {
+      const input = document.createElement('input');
+      input.className = 'info-input';
+      input.placeholder = `Enter ${label.toLowerCase()}`;
+      input.value = extracted[key] || '';
+      input.addEventListener('input', () => { extracted[key] = input.value.trim(); syncState(); });
+      row.appendChild(input);
+      input.focus();
+    }
+  }
+
   function renderExtractedInfo(extracted) {
     const section = $('extracted-section');
     const info = $('extracted-info');
-    if (!extracted || (!extracted.title && !extracted.company)) {
-      section.style.display = 'none';
-      return;
-    }
     section.style.display = 'block';
+    info.innerHTML = '';
+
+    const saveBtn = $('btn-save-tracker');
+    const syncState = () => {
+      saveBtn.disabled = !extracted.title && !extracted.company;
+    };
+
     const fields = [
-      ['Title', extracted.title],
-      ['Company', extracted.company],
-      ['Location', extracted.location],
-      ['Type', extracted.jobType],
-      ['Source', extracted.source || 'Unknown'],
+      ['title', 'Title'],
+      ['company', 'Company'],
+      ['location', 'Location'],
+      ['jobType', 'Type'],
     ];
-    info.innerHTML = fields.map(([label, value]) =>
-      `<div class="info-row"><span class="info-label">${escapeHtml(label)}</span><span class="info-value${value ? '' : ' muted'}">${value ? escapeHtml(value) : 'Not detected'}</span></div>`
-    ).join('');
+    for (const [key, label] of fields) {
+      const row = document.createElement('div');
+      row.className = 'info-row';
+      const labelEl = document.createElement('span');
+      labelEl.className = 'info-label';
+      labelEl.textContent = label;
+      row.appendChild(labelEl);
+      renderField(row, key, label, extracted, syncState);
+      info.appendChild(row);
+    }
+
+    const sourceRow = document.createElement('div');
+    sourceRow.className = 'info-row';
+    sourceRow.innerHTML = `<span class="info-label">Source</span><span class="info-value${extracted.source ? '' : ' muted'}">${escapeHtml(extracted.source || 'Unknown')}</span>`;
+    info.appendChild(sourceRow);
+
+    syncState();
   }
 
   function renderDedupBanner(result) {
@@ -565,9 +661,9 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
   let isJobPage = (page?.inputCount || 0) > 0;
 
   // ── Run extraction + dedup ──────────────────────────────────────────────────
-  const extracted = await extractJobFromPage();
+  let extracted = toEditableExtracted(await extractJobFromPage(), page);
   renderExtractedInfo(extracted);
-  if (extracted && (extracted.url || extracted.title)) {
+  if (extracted.url || extracted.title || extracted.company) {
     const dedupResult = await checkDedup(extracted);
     renderDedupBanner(dedupResult);
   }
@@ -588,6 +684,9 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
           apply_url: extracted.url || '',
           location: extracted.location || '',
           description_snippet: (extracted.description || '').slice(0, 500),
+          job_type: ['fulltime', 'internship', 'coop', 'contract', 'parttime'].includes(extracted.jobType || '')
+            ? extracted.jobType
+            : undefined,
         }),
       });
       if (!res.ok) throw new Error('Failed to save');
@@ -692,11 +791,13 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     try {
       const matchedJobId = jdJobId || await getJobIdFromPage(profile, page);
       const cl = await generateCoverLetter(profile, matchedJobId, jdText || undefined);
-      if (cl) {
+      if (cl && cl.trim()) {
         $('cl-output').value = cl;
         $('cl-output').style.display = 'block';
         $('btn-copy').style.display = 'block';
         showMsg('Cover letter generated!');
+      } else {
+        showMsg('Cover letter came back empty. Try again.', true);
       }
     } catch (e) {
       showMsg(e.message || 'Generation failed', true);

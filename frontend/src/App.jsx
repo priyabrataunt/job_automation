@@ -15,6 +15,13 @@ function timeAgo(isoString) {
   return `${Math.floor(h / 24)}d ago`
 }
 
+function getAppliedDailyProgress(appliedToday) {
+  if (appliedToday >= 45) return { color: '#40a02b', label: 'Great pace (45+)' }
+  if (appliedToday >= 25) return { color: '#df8e1d', label: 'On track (25-44)' }
+  if (appliedToday < 20) return { color: '#d20f39', label: 'Need to push (<20)' }
+  return { color: '#df8e1d', label: 'Keep going' }
+}
+
 // ── Small Components ───────────────────────────────────────────────────────
 function StatCard({ value, label, color }) {
   return (
@@ -2561,6 +2568,11 @@ export default function App() {
 
   const bs = stats?.by_status || {}
   const bsrc = stats?.by_source || {}
+  const appliedToday = stats?.applied_today || 0
+  const appliedDailyProgress = getAppliedDailyProgress(appliedToday)
+  const appliedJobs = tab === 'applied'
+    ? [...jobs].sort((a, b) => new Date(b.status_updated_at || b.first_seen_at || 0) - new Date(a.status_updated_at || a.first_seen_at || 0))
+    : jobs
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'system-ui, sans-serif' }}>
@@ -2803,6 +2815,28 @@ export default function App() {
               </div>
             )}
 
+            {tab === 'applied' && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                <StatCard value={total} label="Total Applied" color="#40a02b" />
+                <div style={{
+                  borderTop: `3px solid ${appliedDailyProgress.color}`,
+                  background: 'var(--bg-surface)',
+                  borderRadius: 8,
+                  padding: '12px 16px',
+                  minWidth: 180,
+                  flex: '1 1 180px',
+                }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: appliedDailyProgress.color }}>
+                    {appliedToday}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Applied Today (Goal: 50)</div>
+                  <div style={{ fontSize: 11, color: appliedDailyProgress.color, fontWeight: 700, marginTop: 4 }}>
+                    {appliedDailyProgress.label}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Results count + pagination */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
@@ -2841,7 +2875,7 @@ export default function App() {
                    tab === 'applied' ? 'No applied jobs yet. Track your applications here.' :
                    'No jobs found. Click "Collect Now" to start fetching jobs.'}
                 </div>
-              ) : jobs.map(job => (
+              ) : appliedJobs.map(job => (
                 <JobCard key={job.id} job={job} onStatusChange={handleStatusChange} onOptimize={setOptimizeJob} onQueue={handleQueueAdd} onOutreach={setOutreachJob} />
               ))}
             </div>

@@ -145,10 +145,25 @@
     .dedup-banner a { color: #89b4fa; text-decoration: underline; }
     .dedup-banner .dedup-title { font-weight: 700; margin-bottom: 4px; }
     .extracted-info { font-size: 12px; line-height: 1.6; }
-    .extracted-info .info-row { display: flex; gap: 6px; margin-bottom: 4px; }
+    .extracted-info .info-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
     .extracted-info .info-label { color: #6c7086; min-width: 70px; flex-shrink: 0; }
     .extracted-info .info-value { color: #cdd6f4; word-break: break-word; }
-    .extracted-info .info-value.muted { color: #6c7086; font-style: italic; }
+    .extracted-info .info-value.muted { color: #6c7086; font-style: italic; cursor: pointer; }
+    .extracted-info .info-value.muted:hover { color: #89b4fa; text-decoration: underline; }
+    .extracted-info .info-input {
+      width: 100%;
+      background: #181825;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-size: 11px;
+      padding: 6px 8px;
+      font-family: system-ui, sans-serif;
+    }
+    .extracted-info .info-input:focus {
+      outline: none;
+      border-color: #89b4fa;
+    }
     .rescan-link {
       margin-left: auto;
       cursor: pointer;

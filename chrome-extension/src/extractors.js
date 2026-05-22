@@ -7,11 +7,24 @@ const JOB_EXTRACTORS = {
       return el?.textContent?.trim() || '';
     },
     company: () => {
-      const el = document.querySelector('.job-details-jobs-unified-top-card__company-name a, .topcard__org-name-link, .jobs-unified-top-card__company-name a');
+      const el = document.querySelector(
+        '.job-details-jobs-unified-top-card__company-name a, ' +
+        '.job-details-jobs-unified-top-card__company-name, ' +
+        '.jobs-unified-top-card__company-name a, ' +
+        '.jobs-unified-top-card__company-name, ' +
+        '.topcard__org-name-link, ' +
+        'a[data-tracking-control-name="public_jobs_topcard-org-name"]'
+      );
       return el?.textContent?.trim() || '';
     },
     location: () => {
-      const el = document.querySelector('.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet, .jobs-unified-top-card__bullet');
+      const el = document.querySelector(
+        '.job-details-jobs-unified-top-card__bullet, ' +
+        '.jobs-unified-top-card__bullet, ' +
+        '.topcard__flavor--bullet, ' +
+        '.jobs-unified-top-card__primary-description-container .tvm__text--low-emphasis, ' +
+        '.jobs-unified-top-card__primary-description-without-tagline .tvm__text--low-emphasis'
+      );
       return el?.textContent?.trim() || '';
     },
     jobType: () => {
@@ -62,16 +75,24 @@ function extractGenericJobData() {
       if (Array.isArray(data)) data = data[0];
       if (data['@graph']) data = data['@graph'].find(item => item['@type'] === 'JobPosting') || data;
       if (data['@type'] === 'JobPosting') {
+        const jobLocationRaw = Array.isArray(data.jobLocation) ? data.jobLocation[0] : data.jobLocation;
+        const employmentType = Array.isArray(data.employmentType)
+          ? data.employmentType.join(', ')
+          : (data.employmentType || '');
+        const normalizedType = employmentType.toLowerCase();
         return {
           title: data.title || '',
           company: typeof data.hiringOrganization === 'string'
             ? data.hiringOrganization
             : data.hiringOrganization?.name || '',
-          location: typeof data.jobLocation === 'string'
-            ? data.jobLocation
-            : data.jobLocation?.address?.addressLocality || data.jobLocation?.name || '',
-          jobType: (data.employmentType || '').toLowerCase().includes('full') ? 'fulltime'
-            : (data.employmentType || '').toLowerCase().includes('intern') ? 'internship' : '',
+          location: typeof jobLocationRaw === 'string'
+            ? jobLocationRaw
+            : jobLocationRaw?.address?.addressLocality || jobLocationRaw?.name || '',
+          jobType: normalizedType.includes('full') ? 'fulltime'
+            : normalizedType.includes('intern') ? 'internship'
+            : normalizedType.includes('contract') ? 'contract'
+            : normalizedType.includes('part') ? 'parttime'
+            : '',
           description: (data.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000),
           source: 'ld+json',
         };
@@ -81,13 +102,27 @@ function extractGenericJobData() {
 
   const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
   const ogSiteName = document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || '';
+  const ogDescription = document.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
+  const metaDescription = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
   const h1 = document.querySelector('h1')?.textContent?.trim() || '';
+  const host = window.location.hostname.toLowerCase().replace(/^www\./, '');
+  const hostParts = host.split('.').filter(Boolean);
+  const inferredCompany = hostParts.length > 2 ? hostParts[0] : '';
+  const pageText = `${ogDescription} ${metaDescription}`.toLowerCase();
+  const inferredLocationMatch = pageText.match(/\b(remote|hybrid|on[-\s]?site)\b/i);
+  const inferredTypeMatch = pageText.match(/\b(full[-\s]?time|intern(ship)?|contract|part[-\s]?time)\b/i);
 
   return {
     title: ogTitle || h1 || document.title || '',
-    company: ogSiteName || '',
-    location: '',
-    jobType: '',
+    company: ogSiteName || inferredCompany || '',
+    location: inferredLocationMatch ? inferredLocationMatch[1] : '',
+    jobType: inferredTypeMatch
+      ? inferredTypeMatch[1].toLowerCase().includes('intern') ? 'internship'
+        : inferredTypeMatch[1].toLowerCase().includes('full') ? 'fulltime'
+        : inferredTypeMatch[1].toLowerCase().includes('contract') ? 'contract'
+        : inferredTypeMatch[1].toLowerCase().includes('part') ? 'parttime'
+        : ''
+      : '',
     description: '',
     source: ogTitle ? 'og-meta' : 'fallback',
   };

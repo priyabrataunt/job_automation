@@ -66,6 +66,23 @@ function quickVisaSignal(text: string): number {
 function stripHtml(html: string): string {
     return html.replace(/<[^>]+>/g, ' ').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
 }
+function getChatCompletionText(completion: any): string {
+    const choice = completion?.choices?.[0];
+    const messageContent = choice?.message?.content;
+    if (typeof messageContent === 'string' && messageContent.trim()) {
+        return messageContent.trim();
+    }
+    if (Array.isArray(messageContent)) {
+        const parts = messageContent
+            .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+            .filter(Boolean);
+        if (parts.length) return parts.join('\n').trim();
+    }
+    if (typeof completion?.output_text === 'string' && completion.output_text.trim()) {
+        return completion.output_text.trim();
+    }
+    return '';
+}
 type AiFillField = {
     label: string;
     type: string;
@@ -326,6 +343,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         const off = parseInt(offset) || 0;
         const total = (await db.prepare(`SELECT COUNT(*) as count FROM jobs ${where}`).get(...params) as any).count;
         let orderBy = 'ORDER BY posted_at DESC';
+        if (status === 'applied' && !sort) {
+            orderBy = 'ORDER BY COALESCE(status_updated_at, first_seen_at) DESC, posted_at DESC';
+        }
         if (sort === 'hired_score_desc')
             orderBy = 'ORDER BY hired_score DESC NULLS LAST, posted_at DESC';
         else if (sort === 'hired_score_asc')
@@ -349,7 +369,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             return reply.code(400).send({ error: 'title and company are required' });
         }
         const snippet = (description_snippet || notes || '').trim();
-        const safeJobType = ['fulltime', 'internship', 'coop'].includes(job_type || '') ? job_type : 'fulltime';
+        const safeJobType = ['fulltime', 'internship', 'coop', 'contract', 'parttime'].includes(job_type || '') ? job_type : 'fulltime';
         const externalId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const result = await db.prepare(`
       INSERT INTO jobs (external_id, title, company, ats_source, location, remote, apply_url,
@@ -447,7 +467,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             updates.push('raw_json = ?');
             params.push(raw_json.trim());
         }
-        if (['fulltime', 'internship', 'coop'].includes(job_type || '')) {
+        if (['fulltime', 'internship', 'coop', 'contract', 'parttime'].includes(job_type || '')) {
             updates.push('job_type = ?');
             params.push(job_type);
         }
@@ -478,6 +498,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         const statusCounts = await db.prepare(`SELECT status, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY status`).all() as any[];
         const sourceCounts = await db.prepare(`SELECT ats_source, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY ats_source`).all() as any[];
         const typeCounts = await db.prepare(`SELECT job_type, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY job_type`).all() as any[];
+        const appliedToday = (await db.prepare(`
+      SELECT COUNT(*) as c
+      FROM jobs
+      WHERE status = 'applied'
+        AND (is_us_job(location) = 1 OR ats_source = 'manual')
+        AND DATE(COALESCE(status_updated_at, first_seen_at)) = CURRENT_DATE
+    `).get() as any).c;
         const now = new Date();
         const h6 = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
         const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
@@ -490,6 +517,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             by_type: Object.fromEntries(typeCounts.map(r => [r.job_type, r.count])),
             new_6h: new6h,
             new_24h: new24h,
+            applied_today: appliedToday,
             last_run: lastRun || null,
         });
     });
@@ -1109,9 +1137,13 @@ ${stripHtml(description).slice(0, 3000)}
         const completion = await client.chat.completions.create({
             model: 'gpt-5',
             max_completion_tokens: 600,
+            reasoning_effort: 'minimal',
             messages,
-        });
-        const text = completion.choices[0]?.message?.content || '';
+        } as any);
+        const text = getChatCompletionText(completion);
+        if (!text) {
+            return reply.code(502).send({ error: 'AI returned an empty cover letter. Try again.' });
+        }
         return reply.send({
             ok: true,
             coverLetter: text,
@@ -1313,9 +1345,13 @@ Guidelines:
             const completion = await client.chat.completions.create({
                 model: 'gpt-5',
                 max_completion_tokens: 200,
+                reasoning_effort: 'minimal',
                 messages: followUpMessages,
-            });
-            const text = completion.choices[0]?.message?.content || '';
+            } as any);
+            const text = getChatCompletionText(completion);
+            if (!text) {
+                return reply.code(502).send({ error: 'AI returned an empty follow-up message' });
+            }
             return reply.send({ ok: true, message: text.trim(), source: 'ai' });
         }
         catch (err: any) {
