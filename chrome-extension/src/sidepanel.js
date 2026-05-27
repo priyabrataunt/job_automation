@@ -555,29 +555,43 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     }
   }
 
-  const TYPE_LABELS = { fulltime: 'Full-time', internship: 'Internship', coop: 'Co-op', contract: 'Contract', parttime: 'Part-time' };
 
-  function renderField(row, key, label, extracted, syncState) {
-    const detected = extracted[key];
-    if (detected) {
-      const span = document.createElement('span');
-      span.className = 'info-value';
-      span.textContent = key === 'jobType' ? (TYPE_LABELS[detected] || detected) : detected;
-      row.appendChild(span);
-    } else {
-      const muted = document.createElement('span');
-      muted.className = 'info-value muted';
-      muted.textContent = 'Not detected — click to edit';
-      muted.addEventListener('click', () => {
-        replaceWithInput(row, key, label, extracted, syncState);
-      });
-      row.appendChild(muted);
-    }
+  const TYPE_LABELS = {
+    fulltime: 'Full-time',
+    internship: 'Internship',
+    coop: 'Co-op',
+    contract: 'Contract',
+    parttime: 'Part-time',
+  };
+
+  function formatFieldDisplay(key, value) {
+    if (key === 'jobType') return TYPE_LABELS[value] || value;
+    return value;
+  }
+
+  function renderFieldDisplay(row, key, label, extracted, syncState) {
+    const value = extracted[key];
+    const span = document.createElement('span');
+    span.className = `info-value editable${value ? '' : ' muted'}`;
+    span.title = 'Double-click to edit';
+    span.textContent = value
+      ? formatFieldDisplay(key, value)
+      : 'Not detected — double-click to edit';
+    span.addEventListener('dblclick', () => {
+      replaceWithInput(row, key, label, extracted, syncState);
+    });
+    row.appendChild(span);
   }
 
   function replaceWithInput(row, key, label, extracted, syncState) {
     const existing = row.querySelector('.info-value, .info-input');
     if (existing) existing.remove();
+
+    const showDisplay = () => {
+      const current = row.querySelector('.info-value, .info-input');
+      if (current) current.remove();
+      renderFieldDisplay(row, key, label, extracted, syncState);
+    };
 
     if (key === 'jobType') {
       const select = document.createElement('select');
@@ -589,18 +603,31 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
         select.appendChild(opt);
       });
       select.value = normalizeJobType(extracted[key]);
-      select.addEventListener('change', () => { extracted[key] = normalizeJobType(select.value); syncState(); });
+      select.addEventListener('change', () => {
+        extracted[key] = normalizeJobType(select.value);
+        syncState();
+      });
+      select.addEventListener('blur', showDisplay);
       row.appendChild(select);
       select.focus();
-    } else {
-      const input = document.createElement('input');
-      input.className = 'info-input';
-      input.placeholder = `Enter ${label.toLowerCase()}`;
-      input.value = extracted[key] || '';
-      input.addEventListener('input', () => { extracted[key] = input.value.trim(); syncState(); });
-      row.appendChild(input);
-      input.focus();
+      return;
     }
+
+    const input = document.createElement('input');
+    input.className = 'info-input';
+    input.placeholder = `Enter ${label.toLowerCase()}`;
+    input.value = extracted[key] || '';
+    input.addEventListener('input', () => {
+      extracted[key] = input.value.trim();
+      syncState();
+    });
+    input.addEventListener('blur', showDisplay);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') input.blur();
+    });
+    row.appendChild(input);
+    input.focus();
+    input.select();
   }
 
   function renderExtractedInfo(extracted) {
@@ -619,6 +646,7 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
       ['company', 'Company'],
       ['location', 'Location'],
       ['jobType', 'Type'],
+      ['source', 'Source'],
     ];
     for (const [key, label] of fields) {
       const row = document.createElement('div');
@@ -627,14 +655,9 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
       labelEl.className = 'info-label';
       labelEl.textContent = label;
       row.appendChild(labelEl);
-      renderField(row, key, label, extracted, syncState);
+      renderFieldDisplay(row, key, label, extracted, syncState);
       info.appendChild(row);
     }
-
-    const sourceRow = document.createElement('div');
-    sourceRow.className = 'info-row';
-    sourceRow.innerHTML = `<span class="info-label">Source</span><span class="info-value${extracted.source ? '' : ' muted'}">${escapeHtml(extracted.source || 'Unknown')}</span>`;
-    info.appendChild(sourceRow);
 
     syncState();
   }
