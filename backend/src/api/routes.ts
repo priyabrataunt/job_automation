@@ -1642,18 +1642,18 @@ Guidelines:
         const { hash } = request.query as { hash?: string };
         if (!hash) return reply.code(400).send({ error: 'hash query param is required' });
         const row = await db.prepare(
-            `SELECT answer, confidence FROM answer_cache
+            `SELECT answer, confidence, source FROM answer_cache
              WHERE question_hash = ?
              ORDER BY confidence DESC, last_used_at DESC NULLS LAST
              LIMIT 1`
-        ).get<{ answer: string; confidence: number }>(hash);
+        ).get<{ answer: string; confidence: number; source: string }>(hash);
         if (!row) return reply.code(404).send({ error: 'not found' });
         // Bump usage counter without blocking the response
         db.prepare(
             `UPDATE answer_cache SET times_used = times_used + 1, last_used_at = NOW()
              WHERE question_hash = ?`
         ).run(hash).catch(() => {});
-        return reply.send({ answer: row.answer, confidence: row.confidence });
+        return reply.send({ answer: row.answer, confidence: row.confidence, source: row.source });
     });
 
     // GET /api/cache — list all cached answers

@@ -255,11 +255,61 @@ async function sha256(text) {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ── User edit protection ─────────────────────────────────────────────────────
+// Prevents auto-fill from overwriting fields the user is actively editing.
+
+const userProtectedFields = new Set();
+let userIsEditing = false;
+let autoFillRunning = false;
+let editProtectionInitialized = false;
+
+function isFormField(el) {
+  return el?.matches?.('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file]), textarea, select');
+}
+
+function markFieldProtected(el) {
+  const label = getLabel(el);
+  if (label) userProtectedFields.add(label.trim().slice(0, 80));
+}
+
+function initEditProtection() {
+  if (editProtectionInitialized) return;
+  editProtectionInitialized = true;
+
+  document.addEventListener('focusin', (e) => {
+    if (!isFormField(e.target)) return;
+    userIsEditing = true;
+    markFieldProtected(e.target);
+  }, true);
+
+  document.addEventListener('focusout', () => {
+    setTimeout(() => {
+      userIsEditing = !isFormField(document.activeElement);
+    }, 200);
+  }, true);
+
+  document.addEventListener('input', (e) => {
+    if (!isFormField(e.target)) return;
+    markFieldProtected(e.target);
+  }, true);
+}
+
+function shouldSkipAutoFill() {
+  return userIsEditing || isFormField(document.activeElement) || autoFillRunning;
+}
+
+function isFieldProtected(labelKey) {
+  return userProtectedFields.has(labelKey);
+}
+
 // ── Answer Cache Integration (Phase 7) ──────────────────────────────────────
+
+/** Sources we trust for automatic cache fill (user explicitly confirmed). */
+const TRUSTED_CACHE_SOURCES = new Set(['manual_correction', 'manual_first_fill']);
 
 /**
  * Look up a cached answer for a question via the backend API.
- * Returns the answer string if found with confidence >= 0.8, null otherwise.
+ * Only returns user-confirmed answers (Remember / manual corrections).
  */
 async function lookupCache(baseUrl, questionText) {
   try {
@@ -267,7 +317,7 @@ async function lookupCache(baseUrl, questionText) {
     const res = await proxyFetch(`${baseUrl}/api/cache/lookup?hash=${encodeURIComponent(hash)}`);
     if (!res.ok) return null;
     const data = JSON.parse(res.body);
-    if (data.answer && (data.confidence ?? 0) >= 0.8) return data.answer;
+    if (data.answer && TRUSTED_CACHE_SOURCES.has(data.source)) return data.answer;
   } catch (_) {}
   return null;
 }
@@ -385,71 +435,218 @@ async function fillCustomDropdown(el, value) {
   }
 }
 
-// ── "Learn this field" button (Phase 7) ─────────────────────────────────────
+// ── Per-field action toolbar (Remember + AI retry) ──────────────────────────
 
-const learnButtonsPlaced = new WeakSet();
+const fieldToolbarsPlaced = new WeakSet();
+const fieldToolbarElements = new Map(); // labelKey -> toolbar div
+
+function getFieldValue(el, descriptor) {
+  const tag = el.tagName?.toLowerCase();
+  if (tag === 'select') {
+    return el.options[el.selectedIndex]?.text?.trim() || el.value?.trim() || '';
+  }
+  if (el.type === 'radio' || el.type === 'checkbox') {
+    if (el.checked) return el.value?.trim() || getLabel(el).trim();
+    if (el.name) {
+      const checked = document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`);
+      return checked?.value?.trim() || '';
+    }
+    return '';
+  }
+  return el.value?.trim() || '';
+}
+
+function buildFieldDescriptor(el, labelKey) {
+  const tag = el.tagName.toLowerCase();
+  const type = tag === 'select' ? 'select'
+    : tag === 'textarea' ? 'textarea'
+    : (el.type || 'text');
+  const descriptor = { label: labelKey, type };
+  if (type === 'select' && el.options?.length) {
+    descriptor.options = Array.from(el.options)
+      .filter(o => o.value !== '')
+      .map(o => o.text.trim())
+      .slice(0, 20);
+  }
+  return descriptor;
+}
+
+function positionFieldToolbar(toolbar, el) {
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return;
+  toolbar.style.position = 'fixed';
+  toolbar.style.top = `${Math.max(4, rect.top + rect.height / 2 - 10)}px`;
+  const toolbarWidth = 90;
+  if (rect.right + toolbarWidth + 8 > window.innerWidth) {
+    toolbar.style.left = `${Math.max(4, rect.left - toolbarWidth - 6)}px`;
+  } else {
+    toolbar.style.left = `${rect.right + 6}px`;
+  }
+  toolbar.style.zIndex = '999999';
+}
 
 /**
- * Place a small "Remember" button next to unfilled fields.
- * When clicked, saves the field's current value to the answer cache.
+ * Place Remember + AI retry buttons beside a field (outside, semi-transparent).
  */
-function placeLearnButton(el, labelKey, baseUrl) {
-  if (learnButtonsPlaced.has(el)) return;
-  learnButtonsPlaced.add(el);
+function placeFieldToolbar(el, labelKey, baseUrl, profile, jobDescription, descriptor) {
+  if (fieldToolbarsPlaced.has(el)) return;
+  fieldToolbarsPlaced.add(el);
 
   try {
-    const btn = document.createElement('button');
-    btn.textContent = 'Remember';
-    btn.className = '__ja-learn-btn';
-    btn.style.position = 'absolute';
-    btn.style.fontSize = '10px';
-    btn.style.padding = '2px 6px';
-    btn.style.background = '#1e66f5';
-    btn.style.color = '#fff';
-    btn.style.border = 'none';
-    btn.style.borderRadius = '4px';
-    btn.style.cursor = 'pointer';
-    btn.style.zIndex = '999998';
-    btn.style.opacity = '0.8';
-    btn.style.fontFamily = 'system-ui, sans-serif';
-    btn.style.fontWeight = '600';
-    btn.title = 'Save this answer for future applications';
+    const toolbar = document.createElement('div');
+    toolbar.className = '__ja-field-toolbar';
+    toolbar.dataset.labelKey = labelKey;
+    toolbar.style.display = 'flex';
+    toolbar.style.gap = '3px';
+    toolbar.style.opacity = '0.35';
+    toolbar.style.transition = 'opacity 0.15s';
+    toolbar.style.pointerEvents = 'auto';
+    toolbar.style.fontFamily = 'system-ui, sans-serif';
 
-    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.8'; });
+    toolbar.addEventListener('mouseenter', () => { toolbar.style.opacity = '1'; });
+    toolbar.addEventListener('mouseleave', () => { toolbar.style.opacity = '0.35'; });
 
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const btnStyle = {
+      fontSize: '9px',
+      padding: '2px 5px',
+      border: '1px solid rgba(30,102,245,0.5)',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontWeight: '600',
+      lineHeight: '1.2',
+      whiteSpace: 'nowrap',
+    };
 
-      const currentValue = el.value?.trim();
-      if (!currentValue) {
-        btn.textContent = 'Fill first!';
-        btn.style.background = '#d20f39';
-        setTimeout(() => { btn.textContent = 'Remember'; btn.style.background = '#1e66f5'; }, 2000);
-        return;
-      }
-
-      await saveToCache(baseUrl, labelKey, currentValue, 'manual_first_fill');
-      btn.textContent = 'Saved!';
-      btn.style.background = '#40a02b';
-      setTimeout(() => {
-        try { btn.remove(); } catch (_) {}
-      }, 2000);
+    const rememberBtn = document.createElement('button');
+    rememberBtn.textContent = 'Remember';
+    rememberBtn.className = '__ja-remember-btn';
+    rememberBtn.title = 'Save this answer for future applications';
+    Object.assign(rememberBtn.style, btnStyle, {
+      background: 'rgba(30, 102, 245, 0.75)',
+      color: '#fff',
     });
 
-    // Position relative to the field
-    const parent = el.parentElement;
-    if (parent) {
-      parent.style.position = parent.style.position || 'relative';
-      parent.appendChild(btn);
-      // Position at top-right of the field's parent
-      btn.style.right = '4px';
-      btn.style.top = '4px';
-    }
+    rememberBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const currentValue = getFieldValue(el, descriptor);
+      if (!currentValue) {
+        rememberBtn.textContent = 'Fill first!';
+        rememberBtn.style.background = 'rgba(210, 15, 57, 0.85)';
+        setTimeout(() => {
+          rememberBtn.textContent = 'Remember';
+          rememberBtn.style.background = 'rgba(30, 102, 245, 0.75)';
+        }, 2000);
+        return;
+      }
+      await saveToCache(baseUrl, labelKey, currentValue, 'manual_first_fill');
+      rememberBtn.textContent = 'Saved!';
+      rememberBtn.style.background = 'rgba(64, 160, 43, 0.85)';
+      setTimeout(() => { rememberBtn.textContent = 'Remember'; rememberBtn.style.background = 'rgba(30, 102, 245, 0.75)'; }, 2000);
+    });
+
+    const aiBtn = document.createElement('button');
+    aiBtn.textContent = 'AI';
+    aiBtn.className = '__ja-ai-retry-btn';
+    aiBtn.title = 'Ask AI to fill this field again (skips cache)';
+    Object.assign(aiBtn.style, btnStyle, {
+      background: 'rgba(136, 57, 239, 0.75)',
+      color: '#fff',
+    });
+
+    aiBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (aiBtn.disabled) return;
+      aiBtn.disabled = true;
+      aiBtn.textContent = '...';
+      userProtectedFields.delete(labelKey);
+      try {
+        const ok = await retryFieldWithAI(el, labelKey, descriptor, baseUrl, profile, jobDescription);
+        if (ok) {
+          aiBtn.textContent = 'Done';
+          aiBtn.style.background = 'rgba(64, 160, 43, 0.85)';
+        } else {
+          aiBtn.textContent = 'Failed';
+          aiBtn.style.background = 'rgba(210, 15, 57, 0.85)';
+        }
+      } catch (_) {
+        aiBtn.textContent = 'Error';
+        aiBtn.style.background = 'rgba(210, 15, 57, 0.85)';
+      }
+      setTimeout(() => {
+        aiBtn.disabled = false;
+        aiBtn.textContent = 'AI';
+        aiBtn.style.background = 'rgba(136, 57, 239, 0.75)';
+      }, 2500);
+    });
+
+    toolbar.appendChild(rememberBtn);
+    toolbar.appendChild(aiBtn);
+    document.body.appendChild(toolbar);
+    fieldToolbarElements.set(labelKey, { toolbar, el });
+
+    positionFieldToolbar(toolbar, el);
+
+    const reposition = () => positionFieldToolbar(toolbar, el);
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    const resizeObserver = new ResizeObserver(reposition);
+    resizeObserver.observe(el);
+    toolbar._cleanup = () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+      resizeObserver.disconnect();
+    };
   } catch (err) {
-    console.warn('[AutoFill] Learn button error:', err);
+    console.warn('[AutoFill] Field toolbar error:', err);
   }
+}
+
+/**
+ * Re-fill a single field via AI, bypassing the answer cache.
+ */
+async function retryFieldWithAI(el, labelKey, descriptor, baseUrl, profile, jobDescription) {
+  showPageBanner('AI retrying: ' + labelKey.slice(0, 40), 'info');
+
+  const proxyResponse = await proxyFetch(baseUrl + '/api/ai-fill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: [descriptor], profile, jobDescription }),
+  });
+
+  if (proxyResponse.error) throw new Error(proxyResponse.error);
+  if (!proxyResponse.ok) throw new Error('Server ' + proxyResponse.status);
+
+  const data = JSON.parse(proxyResponse.body || '{}');
+  if (data.aiError) throw new Error(data.aiError);
+
+  const answer = data.answers?.[labelKey];
+  if (!answer || !String(answer).trim()) return false;
+
+  let ok = false;
+  if (isCustomDropdown(el)) {
+    ok = await fillCustomDropdown(el, String(answer));
+  } else if (descriptor.type === 'radio') {
+    const radios = document.querySelectorAll(`input[type="radio"]`);
+    for (const r of radios) {
+      if (getLabel(r).trim().slice(0, 80) === labelKey && fillInput(r, String(answer))) {
+        ok = true;
+        break;
+      }
+    }
+  } else {
+    ok = fillInput(el, String(answer));
+  }
+
+  if (ok) {
+    showPageBanner('AI filled: ' + labelKey.slice(0, 40), 'success');
+    hideBanner(2500);
+  } else {
+    showPageBanner('AI answer did not match field options', 'error');
+    hideBanner(3000);
+  }
+  return ok;
 }
 
 // ── Form state snapshot for correction detection ────────────────────────────
@@ -479,6 +676,19 @@ function snapshotFormState() {
 // ── Main auto-fill function ───────────────────────────────────────────────────
 
 async function autoFill(profile, jobDescription) {
+  if (autoFillRunning) {
+    console.log('[AutoFill] Skipping — another fill is already in progress');
+    return { filled: [], skipped: [], aiError: 'Fill already in progress', cacheFilled: 0 };
+  }
+  if (shouldSkipAutoFill()) {
+    console.log('[AutoFill] Skipping — user is editing a field');
+    return { filled: [], skipped: [], aiError: null, cacheFilled: 0, skippedDueToEdit: true };
+  }
+
+  initEditProtection();
+  autoFillRunning = true;
+
+  try {
   const inputs = Array.from(document.querySelectorAll('input, textarea, select'));
   const filled = [];
   const skipped = [];
@@ -487,6 +697,13 @@ async function autoFill(profile, jobDescription) {
   const unknownMap = new Map();
   const radioGroups = new Map();
   const baseUrl = (profile.job_tracker_url || 'http://localhost:8000').replace(/\/$/, '');
+
+  /** Place Remember + AI toolbar on a tracked field */
+  function attachFieldToolbar(labelKey, entry) {
+    const el = entry.el;
+    const descriptor = entry.descriptor || buildFieldDescriptor(el, labelKey);
+    placeFieldToolbar(el, labelKey, baseUrl, profile, jobDescription, descriptor);
+  }
 
   // Also scan for custom dropdown elements
   const customDropdowns = Array.from(document.querySelectorAll(
@@ -504,6 +721,9 @@ async function autoFill(profile, jobDescription) {
 
       const label = getLabel(el);
       if (!label) continue;
+
+      const labelKey = label.trim().slice(0, 80);
+      if (isFieldProtected(labelKey)) continue;
 
       let matched = false;
       for (const { keys, profilePath, transform } of FIELD_MAP) {
@@ -564,6 +784,7 @@ async function autoFill(profile, jobDescription) {
       if (!label) continue;
       const labelKey = label.trim().slice(0, 80);
       if (unknownMap.has(labelKey)) continue; // already tracked
+      if (isFieldProtected(labelKey)) continue;
 
       let matched = false;
       for (const { keys, profilePath, transform } of FIELD_MAP) {
@@ -692,9 +913,8 @@ async function autoFill(profile, jobDescription) {
           const answer = answers[labelKey];
           if (!answer || !String(answer).trim()) {
             skipped.push(labelKey.slice(0, 40));
-            // Place "Learn this field" button for unfilled fields
             const freshEl = freshByLabel.get(labelKey) || entry.el;
-            placeLearnButton(freshEl, labelKey, baseUrl);
+            attachFieldToolbar(labelKey, { el: freshEl, descriptor: entry.descriptor });
             continue;
           }
           try {
@@ -713,16 +933,15 @@ async function autoFill(profile, jobDescription) {
             if (ok) {
               filled.push(labelKey.slice(0, 40) + ' (AI)');
               aiFilled++;
-              // Save AI answer to cache for future reuse
-              saveToCache(baseUrl, labelKey, String(answer), 'ai').catch(() => {});
             } else {
               console.warn('[AutoFill] Fill failed:', labelKey, '=', answer);
               skipped.push(labelKey.slice(0, 40));
-              placeLearnButton(freshEl, labelKey, baseUrl);
             }
+            attachFieldToolbar(labelKey, { el: freshEl, descriptor: entry.descriptor });
           } catch (fillErr) {
             console.warn('[AutoFill] Error filling', labelKey, fillErr);
             skipped.push(labelKey.slice(0, 40));
+            attachFieldToolbar(labelKey, entry);
           }
         }
 
@@ -755,7 +974,17 @@ async function autoFill(profile, jobDescription) {
     console.log('[AutoFill] No unknown fields -- skipping AI phase');
   }
 
+  // Attach toolbars to all tracked unknown fields (cache-filled, profile-skipped, etc.)
+  for (const [labelKey, entry] of unknownMap) {
+    if (!fieldToolbarElements.has(labelKey)) {
+      attachFieldToolbar(labelKey, entry);
+    }
+  }
+
   return { filled, skipped, aiError, cacheFilled: cacheFilled.length };
+  } finally {
+    autoFillRunning = false;
+  }
 }
 
 // ── Detect which ATS we're on ─────────────────────────────────────────────────
@@ -810,6 +1039,11 @@ function startMultiStepObserver() {
     // Debounce: wait 500ms for DOM to settle before re-filling
     clearTimeout(multiStepDebounce);
     multiStepDebounce = setTimeout(() => {
+      if (shouldSkipAutoFill()) {
+        console.log('[AutoFill] Multi-step: skipped — user is editing');
+        return;
+      }
+
       const currentFieldCount = document.querySelectorAll(
         'input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select'
       ).length;
@@ -820,6 +1054,10 @@ function startMultiStepObserver() {
         knownFieldCount = currentFieldCount;
         showPageBanner('New form section detected, auto-filling...', 'info');
         autoFill(lastAutoFillProfile, lastJobDescription).then((result) => {
+          if (result.skippedDueToEdit) {
+            hideBanner(500);
+            return;
+          }
           if (result.filled.length > 0) {
             showPageBanner(`Filled ${result.filled.length} new fields`, 'success');
             hideBanner(3000);
@@ -829,7 +1067,7 @@ function startMultiStepObserver() {
         }).catch(() => {});
       }
       knownFieldCount = currentFieldCount;
-    }, 500);
+    }, 800);
   });
 
   multiStepObserver.observe(document.body, {
