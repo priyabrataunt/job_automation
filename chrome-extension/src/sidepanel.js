@@ -395,27 +395,6 @@ async function markApplied(profile, page, jdState) {
   }
 }
 
-// ── Generate cover letter via backend (uses ANTHROPIC_API_KEY server-side) ───
-
-async function generateCoverLetter(profile, jobId, jobDescription) {
-  const baseUrl = getTrackerBaseUrl(profile);
-  if (!jobId && !jobDescription) {
-    showMsg('Paste a job description first, or open the application from Job Tracker.', true);
-    return null;
-  }
-  const res = await fetch(`${baseUrl}/api/cover-letter`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jobId: jobId || undefined,
-      jobDescription: jobDescription || undefined,
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Generation failed');
-  return data.coverLetter;
-}
-
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 (async () => {
@@ -432,7 +411,7 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
 
   // ── JD context state ────────────────────────────────────────────────────────
   const storedJd = await new Promise(resolve => {
-    chrome.storage.local.get(['jdText', 'jdJobId', 'jdCompany', 'jdTitle', 'jdLocation', 'jdDescriptionSnippet'], data => resolve(data));
+    chrome.storage.local.get(['jdText', 'jdJobId', 'jdCompany', 'jdTitle', 'jdLocation', 'jdDescriptionSnippet', 'jdHighlights'], data => resolve(data));
   });
   let jdText = storedJd.jdText || '';
   let jdJobId = storedJd.jdJobId || null;
@@ -440,7 +419,38 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
   let jdTitle = storedJd.jdTitle || '';
   let jdLocation = storedJd.jdLocation || '';
   let jdDescriptionSnippet = storedJd.jdDescriptionSnippet || '';
+  let jdHighlights = Array.isArray(storedJd.jdHighlights) ? storedJd.jdHighlights : [];
   let jdExpanded = !!jdText;
+
+  const HIGHLIGHT_ICON = { danger: '🔴', warning: '🟡', info: '🔵', positive: '🟢', neutral: '⚪' };
+  const SEVERITY_RANK = { danger: 0, warning: 1, info: 2, positive: 3, neutral: 4 };
+
+  function renderJdHighlights() {
+    const box = $('jd-highlights');
+    box.innerHTML = '';
+    if (!jdJobId || !jdHighlights.length) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = 'flex';
+    const sorted = [...jdHighlights].sort((a, b) =>
+      (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
+    for (const h of sorted) {
+      const severity = HIGHLIGHT_ICON[h.severity] ? h.severity : 'info';
+      const hasUrl = typeof h.url === 'string' && /^https?:\/\//i.test(h.url);
+      const tag = document.createElement(hasUrl ? 'a' : 'span');
+      tag.className = `highlight-tag ${severity}`;
+      tag.title = h.detail || h.category || '';
+      const prefix = hasUrl ? `🔗 ${HIGHLIGHT_ICON[severity]} ` : `${HIGHLIGHT_ICON[severity]} `;
+      tag.textContent = `${prefix}${h.label}`;
+      if (hasUrl) {
+        tag.href = h.url;
+        tag.target = '_blank';
+        tag.rel = 'noopener noreferrer';
+      }
+      box.appendChild(tag);
+    }
+  }
 
   function renderJdState() {
     if (jdText) {
@@ -463,6 +473,7 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
   }
 
   renderJdState();
+  renderJdHighlights();
 
   // ── JD toggle ──
   $('jd-toggle').addEventListener('click', () => {
@@ -500,9 +511,11 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
       jdTitle = data.title;
       jdLocation = data.location || '';
       jdDescriptionSnippet = data.descriptionSnippet || '';
-      chrome.storage.local.set({ jdJobId, jdCompany, jdTitle, jdLocation, jdDescriptionSnippet });
+      jdHighlights = Array.isArray(data.highlights) ? data.highlights : [];
+      chrome.storage.local.set({ jdJobId, jdCompany, jdTitle, jdLocation, jdDescriptionSnippet, jdHighlights });
       $('jd-badge-text').textContent = `JD loaded ✓ — ${jdCompany} · ${jdTitle}`;
       $('btn-add-tracker').textContent = '✓ Added to Tracker';
+      renderJdHighlights();
       showMsg(`Added "${jdTitle}" at ${jdCompany} to tracker!`);
     } catch (e) {
       $('btn-add-tracker').disabled = false;
@@ -519,14 +532,16 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     jdTitle = '';
     jdLocation = '';
     jdDescriptionSnippet = '';
+    jdHighlights = [];
     jdExpanded = false;
-    chrome.storage.local.remove(['jdText', 'jdJobId', 'jdCompany', 'jdTitle', 'jdLocation', 'jdDescriptionSnippet']);
+    chrome.storage.local.remove(['jdText', 'jdJobId', 'jdCompany', 'jdTitle', 'jdLocation', 'jdDescriptionSnippet', 'jdHighlights']);
     $('jd-text').value = '';
     $('jd-badge').style.display = 'none';
     $('jd-input-area').style.display = 'none';
     $('jd-toggle').textContent = '▼ Paste JD';
     $('btn-add-tracker').disabled = true;
     $('btn-add-tracker').textContent = '📋 Add to Tracker';
+    renderJdHighlights();
   });
 
   // ── Extract job info from current page ──────────────────────────────────────
@@ -803,39 +818,6 @@ async function generateCoverLetter(profile, jobId, jobDescription) {
     }
     $('btn-autofill').disabled = false;
     $('btn-autofill').textContent = '⚡ Auto-Fill This Form';
-  });
-
-  // ── Cover letter button ──
-  $('btn-coverletter').addEventListener('click', async () => {
-    $('btn-coverletter').disabled = true;
-    $('btn-coverletter').textContent = 'Generating...';
-    $('cl-output').style.display = 'none';
-    $('btn-copy').style.display = 'none';
-    try {
-      const matchedJobId = jdJobId || await getJobIdFromPage(profile, page);
-      const cl = await generateCoverLetter(profile, matchedJobId, jdText || undefined);
-      if (cl && cl.trim()) {
-        $('cl-output').value = cl;
-        $('cl-output').style.display = 'block';
-        $('btn-copy').style.display = 'block';
-        showMsg('Cover letter generated!');
-      } else {
-        showMsg('Cover letter came back empty. Try again.', true);
-      }
-    } catch (e) {
-      showMsg(e.message || 'Generation failed', true);
-    }
-    $('btn-coverletter').disabled = false;
-    $('btn-coverletter').textContent = '✉️ Generate Cover Letter (Claude)';
-  });
-
-  // ── Copy button ──
-  $('btn-copy').addEventListener('click', () => {
-    const text = $('cl-output').value;
-    navigator.clipboard.writeText(text).then(() => {
-      $('btn-copy').textContent = '✓ Copied!';
-      setTimeout(() => { $('btn-copy').textContent = '📋 Copy to Clipboard'; }, 2000);
-    });
   });
 
   // ── Mark applied button ──

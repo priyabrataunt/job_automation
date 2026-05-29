@@ -1057,106 +1057,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         }
         return reply.send({ ok: true, updated });
     });
-    // POST /api/cover-letter — generate a personalized cover letter via OpenAI
-    app.post('/api/cover-letter', async (request, reply) => {
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey || apiKey === 'your_api_key_here') {
-            return reply.code(503).send({ error: 'OPENAI_API_KEY not configured. Add it to backend/.env' });
-        }
-        const { jobId, jobDescription, resumeId } = request.body as {
-            jobId?: number;
-            jobDescription?: string;
-            resumeId?: number;
-        };
-        if (!jobId && !jobDescription?.trim()) {
-            return reply.code(400).send({ error: 'Either jobId or jobDescription is required' });
-        }
-        const resume = await getResumeForJob(jobId || -1, resumeId);
-        if (!resume?.resume_text) {
-            return reply.code(400).send({ error: 'No resume uploaded. Upload your resume first.' });
-        }
-        let description = '';
-        let jobTitle = 'the role';
-        let jobCompany = 'the company';
-        let jobLocation = 'Not specified';
-        if (jobId) {
-            const job = await db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
-            if (!job)
-                return reply.code(404).send({ error: 'Job not found' });
-            jobTitle = job.title;
-            jobCompany = job.company;
-            jobLocation = job.location || 'Not specified';
-            description = job.description_snippet || '';
-            if (job.raw_json) {
-                try {
-                    const raw = JSON.parse(job.raw_json);
-                    description = raw.description || raw.content || raw.jobDescription || description;
-                }
-                catch { /* use snippet */ }
-            }
-            if (job.ats_source === 'workday' && job.apply_url && (!description || description === job.description_snippet)) {
-                const wdDesc = await fetchWorkdayDescription(job.apply_url);
-                if (wdDesc)
-                    description = wdDesc;
-            }
-        }
-        else {
-            description = jobDescription!;
-        }
-        const client = new OpenAI({ apiKey });
-        const prompt = `You are an expert cover letter writer for software engineers seeking jobs in the US.
-
-Write a concise, personalized cover letter (3–4 paragraphs, ~250 words) for this candidate applying to this role.
-
-## Candidate Resume
-${resume.resume_text.slice(0, 3000)}
-
-## Job Details
-Company: ${jobCompany}
-Title: ${jobTitle}
-Location: ${jobLocation}
-
-## Job Description
-${stripHtml(description).slice(0, 3000)}
-
-## Instructions
-- Start with a strong opening that names the role and company
-- Highlight 2–3 specific skills from the resume that directly match the JD
-- Include one concrete quantified achievement from the resume
-- End with a confident call to action
-- Do NOT include placeholder text like [Your Name] — write it as if ready to send
-- Keep it professional but not robotic — show personality
-- Output only the cover letter text, no headers or meta-commentary`;
-        const messages: Array<{
-            role: 'system' | 'user';
-            content: string;
-        }> = [];
-        if (writingStylePrompt)
-            messages.push({ role: 'system', content: writingStylePrompt });
-        messages.push({ role: 'user', content: prompt });
-        const completion = await client.chat.completions.create({
-            model: 'gpt-5',
-            max_completion_tokens: 600,
-            reasoning_effort: 'minimal',
-            messages,
-        } as any);
-        const text = getChatCompletionText(completion);
-        if (!text) {
-            return reply.code(502).send({ error: 'AI returned an empty cover letter. Try again.' });
-        }
-        return reply.send({
-            ok: true,
-            coverLetter: text,
-            jobTitle,
-            company: jobCompany,
-            resume: {
-                id: resume.id,
-                label: resume.label,
-                filename: resume.filename,
-            },
-        });
-    });
-    // POST /api/jobs/from-jd — extract job details from pasted JD and add to tracker
+    // POST /api/jobs/from-jd — extract job details + dealbreaker highlights from pasted JD
     app.post('/api/jobs/from-jd', async (request, reply) => {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey || apiKey === 'your_api_key_here') {
@@ -1170,28 +1071,66 @@ ${stripHtml(description).slice(0, 3000)}
         }
         const client = new OpenAI({ apiKey });
         const extraction = await client.chat.completions.create({
-            model: 'gpt-5',
-            max_completion_tokens: 200,
+            model: 'gpt-5-nano',
+            max_completion_tokens: 1800,
+            reasoning_effort: 'minimal',
             response_format: { type: 'json_object' },
             messages: [{
                     role: 'user',
-                    content: `Extract these fields from the job description as JSON:
-- company (string, company name only)
-- title (string, job title only)
-- location (string, city/state or "Remote", empty string if not found)
-- description_snippet (string, first 300 chars summarising key responsibilities)
+                    content: `You read job descriptions and extract structured facts plus every useful flag a candidate must know before applying. The goal: the user should NOT have to read the JD — your highlights replace it.
 
-Output ONLY valid JSON: {"company":"...","title":"...","location":"...","description_snippet":"..."}
+Return JSON with this exact shape:
+{
+  "company": "string (company name only)",
+  "title": "string (job title only)",
+  "location": "string (city/state, 'Remote', or empty)",
+  "description_snippet": "string (<=300 chars summarising key responsibilities)",
+  "highlights": [
+    {
+      "category": "<one of the allowed categories below>",
+      "label": "short scannable tag text (<=60 chars)",
+      "severity": "danger | warning | info | positive | neutral",
+      "url": "optional — full URL if the highlight is a link from the JD",
+      "detail": "optional — short tooltip explaining the tag (<=120 chars)"
+    }
+  ]
+}
+
+Allowed categories:
+no_sponsorship, sponsorship_conditional, sponsorship_available,
+citizenship_required, clearance_required, international_excluded,
+experience_required, education_required, certification_preferred,
+tech_stack, travel_required, onsite_required, hybrid_required,
+remote_friendly, location_required, relocation, salary, benefits,
+application_deadline, policy_link, info_link, external_apply,
+equal_opportunity, fair_chance, other
+
+Severity rules:
+- danger: hard blockers for non-citizens / non-residents (US citizen only, active clearance required, no sponsorship at all, no international candidates).
+- warning: material restrictions or conditions the candidate must accept — heavy YoE (5+ yrs), onsite-only at a specific city, "apply on company site", advanced degree required, travel >= 25%, conditional sponsorship like "H-1B lottery only", clearly low salary band, near application deadline.
+- info: useful neutral facts — hybrid policy, preferred location, posted salary band, certifications preferred, tech-stack list, hybrid days, relocation offered, benefits link.
+- positive: candidate-friendly signals — sponsorship available, fully remote, OPT/H-1B welcome, top-of-market salary.
+- neutral: boilerplate worth surfacing once — EEO statement, fair-chance hiring laws, generic "how we work" link.
+
+Extraction rules:
+- ONLY include what is explicitly stated or strongly implied. Do NOT invent.
+- Be GENEROUS — extract everything that could matter: travel %, salary band, degree fields, YoE, tech stack, certs preferred, application deadline policy, fair-chance clauses, sponsorship nuances, location/onsite/hybrid/remote, benefits.
+- LINKS: every non-trivial URL in the JD gets its own tag with the "url" field populated. Classify each link as policy_link, info_link, benefits, application_deadline, or external_apply. Skip social icons and generic homepages.
+- Sponsorship nuance: "H-1B lottery only" or "per company H-1B policy" → category sponsorship_conditional (warning), NOT no_sponsorship.
+- Use short labels: "Travel up to 80%", "Bachelor's degree required", "1+ year experience", "$61K–$100K", "Python / Java / Scala", "AWS / Azure / GCP certs preferred", "H-1B sponsorship — lottery only", "H-1B Lottery Policy", "Application deadlines", "Fair-chance hiring laws apply".
+- Up to 20 highlights. Order: most material first (danger → warning → info → positive → neutral).
+- If a fact appears in multiple places, emit it once.
 
 Job Description:
-${jdText.slice(0, 4000)}`,
+${jdText.slice(0, 10000)}`,
                 }],
-        });
+        } as any);
         let extracted: {
             company?: string;
             title?: string;
             location?: string;
             description_snippet?: string;
+            highlights?: Array<{ category?: string; label?: string; severity?: string; url?: string; detail?: string }>;
         } = {};
         try {
             extracted = JSON.parse(extraction.choices[0]?.message?.content || '{}');
@@ -1203,15 +1142,58 @@ ${jdText.slice(0, 4000)}`,
         const title = (extracted.title || 'Unknown Role').trim();
         const location = (extracted.location || '').trim();
         const snippet = (extracted.description_snippet || jdText.slice(0, 300)).trim();
+        const allowedSeverities = new Set(['danger', 'warning', 'info', 'positive', 'neutral']);
+        const allowedCategories = new Set([
+            'no_sponsorship', 'sponsorship_conditional', 'sponsorship_available',
+            'citizenship_required', 'clearance_required', 'international_excluded',
+            'experience_required', 'education_required', 'certification_preferred',
+            'tech_stack', 'travel_required', 'onsite_required', 'hybrid_required',
+            'remote_friendly', 'location_required', 'relocation', 'salary', 'benefits',
+            'application_deadline', 'policy_link', 'info_link', 'external_apply',
+            'equal_opportunity', 'fair_chance', 'other',
+        ]);
+        const severityRank: Record<string, number> = {
+            danger: 0, warning: 1, info: 2, positive: 3, neutral: 4,
+        };
+        const sanitizeUrl = (raw: unknown): string | undefined => {
+            const s = String(raw || '').trim();
+            if (!s) return undefined;
+            try {
+                const u = new URL(s);
+                return (u.protocol === 'http:' || u.protocol === 'https:') ? u.toString() : undefined;
+            } catch {
+                return undefined;
+            }
+        };
+        const seenLabels = new Set<string>();
+        const highlights = (Array.isArray(extracted.highlights) ? extracted.highlights : [])
+            .map(h => {
+                const severity = allowedSeverities.has(String(h?.severity || '')) ? String(h!.severity) : 'info';
+                const category = allowedCategories.has(String(h?.category || '')) ? String(h!.category) : 'other';
+                const label = String(h?.label || '').trim().slice(0, 60);
+                const url = sanitizeUrl(h?.url);
+                const detail = h?.detail ? String(h.detail).trim().slice(0, 120) : undefined;
+                return { category, label, severity, url, detail };
+            })
+            .filter(h => h.label && !seenLabels.has(h.label.toLowerCase()) && seenLabels.add(h.label.toLowerCase()))
+            .sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9))
+            .slice(0, 20);
         const externalId = `jd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const rawJson = JSON.stringify({ jobDescription: jdText.trim() });
+        const rawJson = JSON.stringify({ jobDescription: jdText.trim(), highlights });
         const result = await db.prepare(`
       INSERT INTO jobs (external_id, title, company, ats_source, location, remote, apply_url,
         job_type, experience_level, department, description_snippet, status, raw_json, first_seen_at)
       VALUES (?, ?, ?, 'manual', ?, 0, '', 'fulltime', 'entry', '', ?, 'saved', ?, datetime('now'))
       RETURNING id
     `).run(externalId, title, company, location, snippet, rawJson);
-        return reply.send({ jobId: result.lastInsertRowid, company, title, location, descriptionSnippet: snippet });
+        return reply.send({
+            jobId: result.lastInsertRowid,
+            company,
+            title,
+            location,
+            descriptionSnippet: snippet,
+            highlights,
+        });
     });
     // POST /api/ai-fill — fill unknown form fields via OpenAI
     app.post('/api/ai-fill', async (request, reply) => {

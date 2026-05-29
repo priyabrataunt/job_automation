@@ -78,20 +78,6 @@
     .badge-blue   { background: #1e3a5f; color: #89b4fa; }
     .badge-green  { background: #1e4620; color: #a6e3a1; }
     .badge-yellow { background: #3b2c00; color: #f9e2af; }
-    #cl-output {
-      width: 100%;
-      min-height: 120px;
-      background: #181825;
-      border: 1px solid #45475a;
-      border-radius: 6px;
-      color: #cdd6f4;
-      font-size: 11px;
-      line-height: 1.6;
-      padding: 10px;
-      resize: vertical;
-      margin-top: 8px;
-      font-family: system-ui, sans-serif;
-    }
     #msg { font-size: 11px; color: #a6e3a1; min-height: 16px; text-align: center; }
     #err { font-size: 11px; color: #f38ba8; min-height: 16px; text-align: center; }
     .field-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
@@ -189,6 +175,72 @@
       user-select: none;
     }
     .rescan-link:hover { text-decoration: underline; }
+    .jd-highlights {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .highlight-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.2;
+      padding: 4px 9px;
+      border-radius: 99px;
+      border: 1px solid transparent;
+      max-width: 100%;
+      word-break: break-word;
+    }
+    .highlight-tag .dotmark {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .highlight-tag.danger {
+      background: #4a1d24;
+      color: #f38ba8;
+      border-color: #6e2630;
+    }
+    .highlight-tag.danger .dotmark   { background: #f38ba8; }
+    .highlight-tag.warning {
+      background: #4a3a14;
+      color: #f9e2af;
+      border-color: #6b531c;
+    }
+    .highlight-tag.warning .dotmark  { background: #f9e2af; }
+    .highlight-tag.info {
+      background: #1e3a5f;
+      color: #89b4fa;
+      border-color: #2a4f80;
+    }
+    .highlight-tag.info .dotmark     { background: #89b4fa; }
+    .highlight-tag.positive {
+      background: #1e4620;
+      color: #a6e3a1;
+      border-color: #2b6630;
+    }
+    .highlight-tag.positive .dotmark { background: #a6e3a1; }
+    .highlight-tag.neutral {
+      background: #313244;
+      color: #a6adc8;
+      border-color: #45475a;
+    }
+    .highlight-tag.neutral .dotmark  { background: #a6adc8; }
+    a.highlight-tag {
+      text-decoration: none;
+      cursor: pointer;
+    }
+    a.highlight-tag:hover { filter: brightness(1.18); }
+    .highlight-empty {
+      font-size: 11px;
+      color: #6c7086;
+      font-style: italic;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -241,18 +293,12 @@
         <textarea id="jd-text" placeholder="Paste job description here..."></textarea>
         <button class="btn btn-subtle" id="btn-add-tracker" style="margin-top:6px" disabled>Add to Tracker</button>
       </div>
+      <div class="jd-highlights" id="jd-highlights" style="display:none"></div>
     </div>
 
     <div class="section">
       <div class="section-title">Auto-Fill</div>
       <button class="btn btn-primary" id="btn-autofill">Auto-Fill This Form</button>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Cover Letter</div>
-      <button class="btn btn-purple" id="btn-coverletter">Generate Cover Letter</button>
-      <textarea id="cl-output" placeholder="Generated cover letter will appear here..." style="display:none"></textarea>
-      <button class="btn btn-subtle" id="btn-copy" style="display:none;margin-top:6px">Copy to Clipboard</button>
     </div>
 
     <div class="section">
