@@ -131,7 +131,7 @@ async function main() {
 
   for (const c of WORKDAY_COMPANIES) {
     const endpoint = `https://${c.id}.${c.wd}.myworkdayjobs.com/wday/cxs/${c.id}/${c.board}/jobs`;
-    const body = { appliedFacets: {}, limit: 1, offset: 0, searchText: 'software engineer' };
+    const body = { appliedFacets: {}, limit: 1, offset: 0, searchText: '' };
     checks.push(() => checkPost('workday', c.displayName, c.id, endpoint, body));
   }
 

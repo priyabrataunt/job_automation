@@ -1,6 +1,6 @@
-// Computer-science role keywords. The filter looks for these as substrings of
-// the title (case-insensitive), so partial phrases like "software engineer"
-// will match "Senior Software Engineer - Backend" etc.
+// Tech-role keywords for CS graduates. The filter looks for these as substrings of
+// the title (case-insensitive), so partial phrases like "software engineer" or
+// "data analyst" will match common variants.
 const TITLE_KEYWORDS = [
   // SWE — generic
   'software engineer', 'software developer', 'software development engineer',
@@ -17,30 +17,58 @@ const TITLE_KEYWORDS = [
   'applied scientist', 'research engineer', 'research scientist',
   'machine learning scientist', 'data scientist',
   'data engineer', 'analytics engineer', 'mlops',
+  'data analyst', 'business analyst', 'business intelligence', 'bi analyst',
+  'reporting analyst', 'quantitative analyst', 'quant analyst', 'insights analyst',
+  'analytics associate', 'operations analyst', 'technology analyst', 'tech analyst',
   // Platform / Infra / DevOps / SRE
   'platform engineer', 'infrastructure engineer', 'cloud engineer',
   'devops engineer', 'site reliability', 'sre',
   'tooling engineer', 'developer tools', 'developer experience', 'devex',
-  'build engineer', 'release engineer',
+  'build engineer', 'release engineer', 'automation engineer',
   // Systems / Embedded / Compiler
   'systems engineer', 'system engineer', 'embedded engineer', 'firmware engineer',
   'compiler engineer', 'kernel engineer', 'distributed systems',
   'performance engineer', 'database engineer',
-  // Security / Networking
+  // Security / Networking / IT
   'security engineer', 'security software engineer', 'application security',
-  'product security', 'network engineer',
+  'product security', 'network engineer', 'network administrator',
+  'security analyst', 'cyber security', 'cybersecurity', 'information security',
+  'soc analyst', 'threat analyst',
+  'it analyst', 'it specialist', 'it associate', 'systems administrator',
+  'system administrator', 'sysadmin', 'database administrator', 'dba',
+  'technical support', 'help desk', 'desktop support', 'noc analyst',
   // QA / Test
   'qa engineer', 'quality engineer', 'test engineer', 'sdet',
+  // Product / Program / Project (tech)
+  'product manager', 'associate product manager', 'technical product manager',
+  'product analyst', 'product operations', 'product coordinator',
+  'program manager', 'technical program manager', 'tpm',
+  'technical project manager', 'it project manager',
+  // Design / UX
+  'ux designer', 'ui designer', 'product designer', 'interaction designer',
+  'visual designer', 'ux researcher', 'user researcher', 'design technologist',
+  'ux writer',
+  // Developer relations / advocacy
+  'developer relations', 'developer advocate', 'devrel',
+  // Consulting / implementation / solutions (technical)
+  'solutions consultant', 'technical consultant', 'implementation consultant',
+  'integration consultant', 'solutions architect', 'cloud consultant',
+  'technical account manager', 'forward deployed',
+  // Writing / docs
+  'technical writer', 'documentation engineer',
+  // Quant / computational
+  'quant developer', 'quantitative developer', 'bioinformatics', 'computational',
   // New-grad / level signals (intern/coop alone is NOT enough — see below)
   'new grad', 'new graduate',
   'engineer i', 'engineer ii', 'engineer 1', 'engineer 2', 'associate engineer',
   'junior engineer', 'junior developer', 'entry level engineer',
+  'associate technologist', 'digital analyst',
 ];
 
 // Used only when the title contains "intern" / "co-op". A bare "Intern" title
-// is not enough — it also has to mention a CS domain word, otherwise things
+// is not enough — it also has to mention a tech-domain word, otherwise things
 // like "Materials Characterization Intern" or "NDT Technician Co-op" leak in.
-const CS_DOMAIN_KEYWORDS = [
+const TECH_DOMAIN_KEYWORDS = [
   'software', 'computer', 'coding', 'programming', 'algorithm',
   'backend', 'back-end', 'back end', 'frontend', 'front-end', 'front end',
   'full stack', 'fullstack', 'full-stack',
@@ -49,23 +77,33 @@ const CS_DOMAIN_KEYWORDS = [
   'artificial intelligence', 'deep learning', 'nlp', 'computer vision',
   'devops', 'sre', 'site reliability', 'platform', 'infrastructure', 'cloud',
   'systems', 'embedded', 'firmware', 'compiler', 'kernel', 'distributed',
-  'security', 'cyber', 'network engineer', 'database',
+  'security', 'cyber', 'network', 'database',
   'qa', 'sdet', 'test automation',
   'developer', 'engineering', 'engineer',
-  'sde', 'swe', 'tech', 'it ',
+  'sde', 'swe', 'tech', 'it ', 'information technology',
+  'product', 'program', 'project', 'design', 'ux', 'ui',
+  'analyst', 'consultant', 'architect', 'scientist',
+  'digital', 'fintech', 'saas', 'technical', 'technology',
+  'bioinformatics', 'computational', 'quant',
 ];
 
-// Non-CS roles that frequently slip through because they contain "engineer"
-// or "developer". Reject before TITLE_KEYWORDS evaluation.
-const NON_CS_TITLE_BLOCKLIST = [
-  'sales engineer', 'solutions engineer', 'solution engineer',
-  'customer engineer', 'support engineer', 'field engineer',
-  'forward deployed engineer', 'implementation engineer',
-  'business development', 'developer relations', 'developer advocate',
+// Non-tech roles that frequently slip through because they contain "engineer",
+// "developer", "analyst", or "manager". Reject before TITLE_KEYWORDS evaluation.
+const NON_TECH_TITLE_BLOCKLIST = [
+  'sales engineer', 'customer engineer', 'field engineer',
+  'business development',
   'mechanical engineer', 'electrical engineer', 'hardware engineer',
   'civil engineer', 'chemical engineer', 'biomedical', 'optical engineer',
   'manufacturing engineer', 'process engineer', 'industrial engineer',
   'rf engineer', 'antenna engineer',
+  'financial analyst', 'credit analyst', 'investment analyst',
+  'marketing analyst', 'brand analyst', 'seo analyst',
+  'recruiter', 'talent acquisition', 'human resources', ' hr ',
+  'account executive', 'account manager',
+  'legal counsel', 'paralegal', 'attorney',
+  'nurse', 'clinical', 'pharmacist', 'physician',
+  'real estate', 'construction manager', 'warehouse', 'forklift',
+  'underwriter', 'loan officer', 'insurance agent',
 ];
 
 const ENTRY_LEVEL_KEYWORDS = [
@@ -76,20 +114,24 @@ const ENTRY_LEVEL_KEYWORDS = [
 ];
 
 const EXCLUDE_SENIORITY = [
-  'senior', 'sr.', ' sr ', 'lead', 'principal', 'staff', 'manager',
-  'director', 'architect', 'head of', 'vp ', 'vice president',
-  'distinguished', 'fellow', 'expert', 'specialist', 'consultant',
+  'senior', 'sr.', ' sr ', 'lead', 'principal', 'staff',
+  'director', 'head of', 'vp ', 'vice president',
+  'distinguished', 'fellow', 'expert',
+  'engineering manager', 'senior manager', 'group manager',
+  'director of engineering', 'director of product',
+  'principal architect', 'staff architect', 'senior architect', 'lead architect',
+  'senior consultant', 'principal consultant',
   '5+ years', '6+ years', '7+ years', '8+ years', '10+ years',
   '5 years', '6 years', '7 years', '8 years', '10 years',
 ];
 
 export function isRelevantTitle(title: string): boolean {
   const t = ` ${title.toLowerCase()} `;
-  if (NON_CS_TITLE_BLOCKLIST.some(kw => t.includes(kw))) return false;
+  if (NON_TECH_TITLE_BLOCKLIST.some(kw => t.includes(kw))) return false;
   if (TITLE_KEYWORDS.some(kw => t.includes(kw))) return true;
-  // For intern / co-op titles, require an explicit CS-domain keyword.
+  // For intern / co-op titles, require an explicit tech-domain keyword.
   const isIntern = /\bintern(ship)?\b|\bco-?op\b/.test(t);
-  if (isIntern && CS_DOMAIN_KEYWORDS.some(kw => t.includes(kw))) return true;
+  if (isIntern && TECH_DOMAIN_KEYWORDS.some(kw => t.includes(kw))) return true;
   return false;
 }
 
@@ -111,7 +153,7 @@ const CITIZENSHIP_PHRASES = [
 export function requiresUsCitizenship(...texts: (string | undefined | null)[]): boolean {
   const blob = texts
     .filter((s): s is string => typeof s === 'string' && s.length > 0)
-    .join('  ')
+    .join(' \x01 ')
     .toLowerCase()
     .replace(/<[^>]+>/g, ' ');
   return CITIZENSHIP_PHRASES.some(p => blob.includes(p));
@@ -126,7 +168,7 @@ export function isEntryLevel(title: string, description: string): boolean {
   // Exclude only if seniority keywords are explicitly present in title
   if (EXCLUDE_SENIORITY.some(kw => t.includes(kw))) return false;
 
-  // Everything else passes — "Software Engineer" is assumed to be entry-level eligible
+  // Everything else passes — tech titles without senior signals are entry-level eligible
   return true;
 }
 

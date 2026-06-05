@@ -39,7 +39,7 @@ async function tryWorkdayFetch(company: WorkdayCompany): Promise<any[]> {
   const url = `https://${company.id}.${company.wd}.myworkdayjobs.com/wday/cxs/${company.id}/${company.board}/jobs`;
   const { data } = await axios.post(
     url,
-    { appliedFacets: {}, limit: 20, offset: 0, searchText: 'software engineer' },
+    { appliedFacets: {}, limit: 50, offset: 0, searchText: '' },
     { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
   );
   return data.jobPostings || [];
