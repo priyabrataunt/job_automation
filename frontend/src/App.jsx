@@ -2568,6 +2568,8 @@ export default function App() {
 
   const bs = stats?.by_status || {}
   const bsrc = stats?.by_source || {}
+  // Postgres COUNT values arrive as strings — coerce before arithmetic.
+  const trackedTotal = Number(bs.new || 0) + Number(bs.saved || 0) + Number(bs.applied || 0)
   const appliedToday = stats?.applied_today || 0
   const appliedDailyProgress = getAppliedDailyProgress(appliedToday)
   const appliedJobs = tab === 'applied'
@@ -2700,7 +2702,7 @@ export default function App() {
             {/* Stats Row (only on All Jobs) */}
             {tab === 'all' && (
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-                <StatCard value={(bs.new || 0) + (bs.saved || 0) + (bs.applied || 0)} label="Total" color="#89b4fa" />
+                <StatCard value={trackedTotal} label="Total" color="#89b4fa" />
                 <StatCard value={bs.new || 0} label="New" color="#1e66f5" />
                 <StatCard value={bs.saved || 0} label="Saved" color="#8839ef" />
                 <StatCard value={bs.applied || 0} label="Applied" color="#40a02b" />
@@ -2884,7 +2886,7 @@ export default function App() {
 
         {/* Footer */}
         <div style={{ textAlign: 'center', color: 'var(--border)', fontSize: 11, padding: '40px 0 20px' }}>
-          Job Tracker · Auto-refreshes every 6h · {stats ? `${(bs.new || 0) + (bs.saved || 0) + (bs.applied || 0)}` : '0'} total jobs tracked
+          Job Tracker · Auto-refreshes every 6h · {stats ? trackedTotal : 0} total jobs tracked
         </div>
       </div>
 

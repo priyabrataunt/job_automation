@@ -495,11 +495,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
     // GET /api/stats
     app.get('/api/stats', async (_request, reply) => {
-        const statusCounts = await db.prepare(`SELECT status, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY status`).all() as any[];
-        const sourceCounts = await db.prepare(`SELECT ats_source, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY ats_source`).all() as any[];
-        const typeCounts = await db.prepare(`SELECT job_type, COUNT(*) as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY job_type`).all() as any[];
+        const statusCounts = await db.prepare(`SELECT status, COUNT(*)::int as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY status`).all() as any[];
+        const sourceCounts = await db.prepare(`SELECT ats_source, COUNT(*)::int as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY ats_source`).all() as any[];
+        const typeCounts = await db.prepare(`SELECT job_type, COUNT(*)::int as count FROM jobs WHERE is_us_job(location) = 1 GROUP BY job_type`).all() as any[];
         const appliedToday = (await db.prepare(`
-      SELECT COUNT(*) as c
+      SELECT COUNT(*)::int as c
       FROM jobs
       WHERE status = 'applied'
         AND (is_us_job(location) = 1 OR ats_source = 'manual')
@@ -508,8 +508,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         const now = new Date();
         const h6 = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
         const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-        const new6h = (await db.prepare(`SELECT COUNT(*) as c FROM jobs WHERE is_us_job(location) = 1 AND posted_at >= ?`).get(h6) as any).c;
-        const new24h = (await db.prepare(`SELECT COUNT(*) as c FROM jobs WHERE is_us_job(location) = 1 AND posted_at >= ?`).get(h24) as any).c;
+        const new6h = (await db.prepare(`SELECT COUNT(*)::int as c FROM jobs WHERE is_us_job(location) = 1 AND posted_at >= ?`).get(h6) as any).c;
+        const new24h = (await db.prepare(`SELECT COUNT(*)::int as c FROM jobs WHERE is_us_job(location) = 1 AND posted_at >= ?`).get(h24) as any).c;
         const lastRun = await db.prepare(`SELECT * FROM runs ORDER BY id DESC LIMIT 1`).get();
         return reply.send({
             by_status: Object.fromEntries(statusCounts.map(r => [r.status, r.count])),
