@@ -86,6 +86,17 @@
       font-size: 10px; padding: 2px 7px; border-radius: 4px;
     }
     .field-tag.ai { background: #1e3a5f; color: #89b4fa; }
+    .field-tag.cached { background: #3b2c00; color: #f9e2af; }
+    .field-tag.skip { background: #4a1d24; color: #f38ba8; }
+    .backend-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: #a6adc8;
+      white-space: nowrap;
+    }
     #jd-text {
       width: 100%;
       min-height: 100px;
@@ -249,6 +260,10 @@
       <h1>Job Tracker</h1>
       <div class="subtitle" id="page-ats">Detecting page...</div>
     </div>
+    <div class="backend-status" title="Job tracker backend connectivity">
+      <span class="dot" id="backend-dot" style="background:#45475a"></span>
+      <span id="backend-label">Backend</span>
+    </div>
   </div>
 
   <div class="body">
@@ -283,6 +298,7 @@
     <div class="section">
       <div class="section-title-row">
         <div class="section-title" style="margin-bottom:0">Job Context</div>
+        <span id="jd-from-page" title="Copy the job description detected on this page into the box below" style="display:none;cursor:pointer;font-size:11px;color:#f9e2af;font-weight:600;margin-left:auto;margin-right:10px">⤓ From page</span>
         <span id="jd-toggle">Paste JD</span>
       </div>
       <div id="jd-badge">

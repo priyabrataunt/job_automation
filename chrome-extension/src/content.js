@@ -6,18 +6,24 @@
 // ── Field label matchers ─────────────────────────────────────────────────────
 const FIELD_MAP = [
   // Personal
-  { keys: ['first name', 'firstname', 'first_name'], profilePath: 'personal.name', transform: 'firstName' },
-  { keys: ['last name', 'lastname', 'last_name', 'surname'], profilePath: 'personal.name', transform: 'lastName' },
-  { keys: ['full name', 'fullname', 'full_name', 'name'], profilePath: 'personal.name' },
-  { keys: ['email', 'e-mail', 'email address'], profilePath: 'personal.email' },
-  { keys: ['phone', 'telephone', 'mobile', 'cell'], profilePath: 'personal.phone' },
-  { keys: ['city'], profilePath: 'personal.address.city' },
+  { keys: ['first name', 'firstname', 'given name', 'preferred name'], profilePath: 'personal.name', transform: 'firstName' },
+  { keys: ['last name', 'lastname', 'surname', 'family name'], profilePath: 'personal.name', transform: 'lastName' },
+  {
+    keys: ['full name', 'fullname', 'your name', 'legal name', 'name'],
+    exclude: ['company', 'employer', 'organization', 'business', 'school', 'university', 'college',
+      'institution', 'manager', 'supervisor', 'reference', 'referral', 'recruiter', 'emergency',
+      'contact name', 'middle', 'file', 'project', 'team', 'first', 'last'],
+    profilePath: 'personal.name',
+  },
+  { keys: ['email', 'e-mail'], exclude: ['manager', 'supervisor', 'reference', 'referral', 'recruiter', 'emergency'], profilePath: 'personal.email' },
+  { keys: ['phone', 'telephone', 'mobile', 'cell'], exclude: ['emergency', 'reference', 'manager'], profilePath: 'personal.phone' },
+  { keys: ['city', 'town'], profilePath: 'personal.address.city' },
   { keys: ['state', 'province'], profilePath: 'personal.address.state' },
-  { keys: ['zip', 'postal', 'postal code', 'zip code'], profilePath: 'personal.address.zip' },
-  { keys: ['country'], profilePath: 'personal.address.country' },
-  { keys: ['linkedin', 'linkedin url', 'linkedin profile'], profilePath: 'personal.linkedin' },
-  { keys: ['github', 'github url', 'github profile'], profilePath: 'personal.github' },
-  { keys: ['website', 'portfolio', 'personal website', 'personal url'], profilePath: 'personal.portfolio' },
+  { keys: ['zip', 'postal', 'postal code', 'zip code', 'postcode'], profilePath: 'personal.address.zip' },
+  { keys: ['country'], exclude: ['citizenship', 'citizen', 'birth', 'origin', 'nationality'], profilePath: 'personal.address.country' },
+  { keys: ['linkedin'], profilePath: 'personal.linkedin' },
+  { keys: ['github', 'git hub'], profilePath: 'personal.github' },
+  { keys: ['website', 'portfolio', 'personal url', 'personal site'], exclude: ['company', 'employer'], profilePath: 'personal.portfolio' },
 
   // Work auth
   { keys: ['authorized to work', 'work authorization', 'legally authorized', 'eligible to work'], profilePath: 'work_auth_answers.authorized_to_work' },
@@ -46,35 +52,107 @@ function applyTransform(value, transform) {
   return value;
 }
 
-function labelMatches(labelText, keys) {
-  const lower = (labelText || '').toLowerCase();
-  return keys.some(k => lower.includes(k));
+// Word-boundary matching so 'state' does not match "statement", 'city' does
+// not match "capacity", 'name' does not match "nickname", etc.
+const KEY_REGEX_CACHE = new Map();
+function keyRegex(key) {
+  let re = KEY_REGEX_CACHE.get(key);
+  if (!re) {
+    const pattern = key
+      .trim()
+      .split(/[\s_-]+/)
+      .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[\\s_-]*');
+    re = new RegExp(`(^|[^a-z0-9])${pattern}([^a-z0-9]|$)`, 'i');
+    KEY_REGEX_CACHE.set(key, re);
+  }
+  return re;
 }
 
+function labelMatches(labelText, keys, exclude) {
+  const lower = (labelText || '').toLowerCase();
+  if (!lower) return false;
+  if (exclude && exclude.some(k => keyRegex(k).test(lower))) return false;
+  return keys.some(k => keyRegex(k).test(lower));
+}
+
+function resolveIdList(idList) {
+  return String(idList || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(id => document.getElementById(id)?.textContent || '')
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Question-level label for a field. For radio/checkbox groups this is the
+ * group question (fieldset legend / radiogroup label), NOT the option text —
+ * use getOptionLabel for that.
+ */
 function getLabel(el) {
   try {
-    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
-    if (el.placeholder) return el.placeholder;
+    // Radio/checkbox: the question lives on the group, not the option
+    if (el.type === 'radio' || el.type === 'checkbox') {
+      const legend = el.closest('fieldset')?.querySelector('legend');
+      if (legend?.textContent?.trim()) return legend.textContent;
+      const group = el.closest('[role="radiogroup"], [role="group"]');
+      if (group) {
+        const groupAria = group.getAttribute('aria-label');
+        if (groupAria?.trim()) return groupAria;
+        const groupLabelled = resolveIdList(group.getAttribute('aria-labelledby'));
+        if (groupLabelled) return groupLabelled;
+      }
+    }
+
+    const aria = el.getAttribute('aria-label');
+    if (aria?.trim()) return aria;
+
+    const labelledBy = resolveIdList(el.getAttribute('aria-labelledby'));
+    if (labelledBy) return labelledBy;
 
     const id = el.id;
     if (id) {
       const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
-      if (label) return label.textContent;
+      if (label?.textContent?.trim()) return label.textContent;
     }
 
-    // Walk up to find a label/legend
+    const wrapping = el.closest('label');
+    if (wrapping?.textContent?.trim()) return wrapping.textContent;
+
+    // Walk up to find a label/legend, skipping labels tied to other fields
     let parent = el.parentElement;
     for (let i = 0; i < 5 && parent; i++) {
       const label = parent.querySelector('label');
-      if (label) return label.textContent;
+      if (label?.textContent?.trim()) {
+        const forId = label.getAttribute('for');
+        if (!forId || forId === el.id) return label.textContent;
+      }
       const legend = parent.querySelector('legend');
-      if (legend) return legend.textContent;
+      if (legend?.textContent?.trim()) return legend.textContent;
       parent = parent.parentElement;
     }
+
+    if (el.placeholder?.trim()) return el.placeholder;
   } catch (e) {
     console.warn('[AutoFill] getLabel error:', e);
   }
   return el.name || '';
+}
+
+/** Option-level label for a single radio/checkbox (e.g. "Yes", "No"). */
+function getOptionLabel(el) {
+  try {
+    if (el.id) {
+      const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (label?.textContent?.trim()) return label.textContent;
+    }
+    const wrapping = el.closest('label');
+    if (wrapping?.textContent?.trim()) return wrapping.textContent;
+    const aria = el.getAttribute('aria-label');
+    if (aria?.trim()) return aria;
+  } catch (_) {}
+  return el.value || '';
 }
 
 /** Check if a field already has a user-provided value */
@@ -83,7 +161,16 @@ function isAlreadyFilled(el) {
   if (tag === 'select') {
     return el.selectedIndex > 0;
   }
-  if (el.type === 'radio' || el.type === 'checkbox') {
+  if (el.type === 'radio') {
+    // A radio group counts as filled if ANY option in the group is selected
+    if (el.name) {
+      try {
+        return !!document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`);
+      } catch (_) {}
+    }
+    return el.checked;
+  }
+  if (el.type === 'checkbox') {
     return el.checked;
   }
   return !!(el.value && el.value.trim());
@@ -91,6 +178,7 @@ function isAlreadyFilled(el) {
 
 function fillInput(el, value) {
   if (!value) return false;
+  value = String(value);
 
   const tag = el.tagName.toLowerCase();
 
@@ -139,7 +227,7 @@ function fillInput(el, value) {
 
   if (tag === 'input' && (el.type === 'radio' || el.type === 'checkbox')) {
     const lower = value.toLowerCase().trim();
-    const elLabel = getLabel(el).toLowerCase().trim();
+    const elLabel = getOptionLabel(el).toLowerCase().trim();
     const elValue = (el.value || '').toLowerCase().trim();
 
     // Exact match on label or value
@@ -223,12 +311,16 @@ function hideBanner(delay) {
 // Routes all backend requests through the background service worker to avoid
 // HTTPS → HTTP mixed content blocks.
 
-function proxyFetch(url, options) {
+function proxyFetch(url, options, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Request timed out (30s)')), 30000);
+    const timer = setTimeout(
+      () => reject(new Error(`Request timed out (${Math.round(timeoutMs / 1000)}s)`)),
+      timeoutMs
+    );
     chrome.runtime.sendMessage({
       type: 'FETCH_PROXY',
       url,
+      timeoutMs,
       options: {
         method: options?.method || 'GET',
         headers: options?.headers || {},
@@ -238,11 +330,29 @@ function proxyFetch(url, options) {
       clearTimeout(timer);
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message || 'Extension messaging error'));
+      } else if (!response) {
+        reject(new Error('No response from extension background'));
       } else {
         resolve(response);
       }
     });
   });
+}
+
+// AI calls can legitimately take a while; give them a long timeout and one
+// automatic retry so a transient hiccup doesn't fail the whole fill.
+const AI_FETCH_TIMEOUT_MS = 90000;
+
+async function proxyFetchWithRetry(url, options, timeoutMs) {
+  try {
+    const first = await proxyFetch(url, options, timeoutMs);
+    if (!first.error) return first;
+    throw new Error(first.error);
+  } catch (firstErr) {
+    console.warn('[AutoFill] Request failed, retrying once:', firstErr.message);
+    await new Promise(r => setTimeout(r, 1500));
+    return proxyFetch(url, options, timeoutMs);
+  }
 }
 
 // ── SHA-256 hash (for cache lookup) ─────────────────────────────────────────
@@ -344,6 +454,10 @@ async function saveToCache(baseUrl, questionText, answer, source) {
  * Detect if an element is a custom dropdown (MUI, React Select, Ant Design).
  */
 function isCustomDropdown(el) {
+  // Native selects and plain text inputs are handled directly by fillInput —
+  // never route them through the click-based dropdown flow.
+  if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') return false;
+
   const className = (el.className || '').toString().toLowerCase();
   const role = (el.getAttribute('role') || '').toLowerCase();
   const ariaHasPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
@@ -354,7 +468,8 @@ function isCustomDropdown(el) {
     ariaHasPopup === 'listbox' ||
     className.includes('react-select') ||
     className.includes('ant-select') ||
-    className.includes('mui') ||
+    className.includes('muiautocomplete') ||
+    className.includes('muiselect') ||
     className.includes('select__control') ||
     el.closest('.react-select__control, .ant-select, .MuiAutocomplete-root, [class*="select__control"]') !== null
   );
@@ -446,7 +561,7 @@ function getFieldValue(el, descriptor) {
     return el.options[el.selectedIndex]?.text?.trim() || el.value?.trim() || '';
   }
   if (el.type === 'radio' || el.type === 'checkbox') {
-    if (el.checked) return el.value?.trim() || getLabel(el).trim();
+    if (el.checked) return el.value?.trim() || getOptionLabel(el).trim();
     if (el.name) {
       const checked = document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`);
       return checked?.value?.trim() || '';
@@ -472,8 +587,17 @@ function buildFieldDescriptor(el, labelKey) {
 }
 
 function positionFieldToolbar(toolbar, el) {
+  // Hide toolbars whose field was removed or hidden (SPA step changes)
+  if (!el.isConnected) {
+    toolbar.style.display = 'none';
+    return;
+  }
   const rect = el.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return;
+  if (rect.width === 0 && rect.height === 0) {
+    toolbar.style.display = 'none';
+    return;
+  }
+  toolbar.style.display = 'flex';
   toolbar.style.position = 'fixed';
   toolbar.style.top = `${Math.max(4, rect.top + rect.height / 2 - 10)}px`;
   const toolbarWidth = 90;
@@ -609,11 +733,11 @@ function placeFieldToolbar(el, labelKey, baseUrl, profile, jobDescription, descr
 async function retryFieldWithAI(el, labelKey, descriptor, baseUrl, profile, jobDescription) {
   showPageBanner('AI retrying: ' + labelKey.slice(0, 40), 'info');
 
-  const proxyResponse = await proxyFetch(baseUrl + '/api/ai-fill', {
+  const proxyResponse = await proxyFetchWithRetry(baseUrl + '/api/ai-fill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: [descriptor], profile, jobDescription }),
-  });
+  }, AI_FETCH_TIMEOUT_MS);
 
   if (proxyResponse.error) throw new Error(proxyResponse.error);
   if (!proxyResponse.ok) throw new Error('Server ' + proxyResponse.status);
@@ -726,10 +850,11 @@ async function autoFill(profile, jobDescription) {
       if (isFieldProtected(labelKey)) continue;
 
       let matched = false;
-      for (const { keys, profilePath, transform } of FIELD_MAP) {
-        if (labelMatches(label, keys)) {
+      for (const { keys, exclude, profilePath, transform } of FIELD_MAP) {
+        if (labelMatches(label, keys, exclude)) {
           let value = getNestedValue(profile, profilePath);
           value = applyTransform(String(value ?? ''), transform);
+          if (!value) continue;
 
           // Check if this is a custom dropdown
           if (isCustomDropdown(el)) {
@@ -787,10 +912,11 @@ async function autoFill(profile, jobDescription) {
       if (isFieldProtected(labelKey)) continue;
 
       let matched = false;
-      for (const { keys, profilePath, transform } of FIELD_MAP) {
-        if (labelMatches(label, keys)) {
+      for (const { keys, exclude, profilePath, transform } of FIELD_MAP) {
+        if (labelMatches(label, keys, exclude)) {
           let value = getNestedValue(profile, profilePath);
           value = applyTransform(String(value ?? ''), transform);
+          if (!value) continue;
           const ok = await fillCustomDropdown(el, value);
           if (ok) {
             filled.push(labelKey.slice(0, 40));
@@ -815,9 +941,17 @@ async function autoFill(profile, jobDescription) {
     console.log('[AutoFill] Phase 1.5: checking answer cache for', unknownMap.size, 'fields');
     showPageBanner('Checking answer cache...', 'info');
 
-    for (const [labelKey, entry] of unknownMap) {
+    // Look up all fields in parallel (one round trip each), then fill
+    // sequentially so custom-dropdown clicks don't interleave.
+    const unknownEntries = Array.from(unknownMap.entries());
+    const cacheAnswers = await Promise.all(
+      unknownEntries.map(([labelKey]) => lookupCache(baseUrl, labelKey).catch(() => null))
+    );
+
+    for (let i = 0; i < unknownEntries.length; i++) {
+      const [labelKey, entry] = unknownEntries[i];
       try {
-        const cachedAnswer = await lookupCache(baseUrl, labelKey);
+        const cachedAnswer = cacheAnswers[i];
         if (cachedAnswer) {
           let ok = false;
           if (entry.isCustom) {
@@ -861,11 +995,11 @@ async function autoFill(profile, jobDescription) {
     showPageBanner('AI filling ' + stillUnknown.size + ' fields...', 'info');
 
     try {
-      const proxyResponse = await proxyFetch(baseUrl + '/api/ai-fill', {
+      const proxyResponse = await proxyFetchWithRetry(baseUrl + '/api/ai-fill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields, profile, jobDescription }),
-      });
+      }, AI_FETCH_TIMEOUT_MS);
 
       if (proxyResponse.error) {
         throw new Error(proxyResponse.error);
@@ -1039,6 +1173,11 @@ function startMultiStepObserver() {
     // Debounce: wait 500ms for DOM to settle before re-filling
     clearTimeout(multiStepDebounce);
     multiStepDebounce = setTimeout(() => {
+      // Reposition/hide field toolbars whose elements moved or were removed
+      for (const { toolbar, el } of fieldToolbarElements.values()) {
+        try { positionFieldToolbar(toolbar, el); } catch (_) {}
+      }
+
       if (shouldSkipAutoFill()) {
         console.log('[AutoFill] Multi-step: skipped — user is editing');
         return;
@@ -1080,42 +1219,62 @@ function startMultiStepObserver() {
 // ── Correction detection: watch for form submission ─────────────────────────
 
 let preSubmitSnapshot = null;
+let submissionWatcherInstalled = false;
+
+async function saveCorrections(baseUrl) {
+  if (!preSubmitSnapshot) return;
+  const snapshot = preSubmitSnapshot;
+  preSubmitSnapshot = null;
+
+  const postState = snapshotFormState();
+  let correctionCount = 0;
+  for (const [label, originalValue] of Object.entries(snapshot)) {
+    const finalValue = postState[label];
+    if (finalValue === undefined) continue;
+    if (finalValue.trim() === originalValue.trim()) continue;
+    if (!finalValue.trim()) continue;
+
+    // User changed this field — save as correction
+    await saveToCache(baseUrl, label, finalValue, 'manual_correction');
+    correctionCount++;
+    console.log(`[AutoFill] Correction saved: "${label}": "${originalValue}" -> "${finalValue}"`);
+  }
+  if (correctionCount > 0) {
+    console.log(`[AutoFill] Saved ${correctionCount} correction(s) to cache`);
+  }
+}
 
 function watchForSubmission(baseUrl) {
   // Capture pre-submit state
   preSubmitSnapshot = snapshotFormState();
 
-  // Listen for form submissions
-  document.addEventListener('submit', async (e) => {
-    if (!preSubmitSnapshot) return;
+  if (submissionWatcherInstalled) return;
+  submissionWatcherInstalled = true;
 
-    // Snapshot the final state right before submission
-    const postState = snapshotFormState();
+  // Native form submissions
+  document.addEventListener('submit', () => { saveCorrections(baseUrl); }, { capture: true });
 
-    // Compare and save corrections
-    let correctionCount = 0;
-    for (const [label, originalValue] of Object.entries(preSubmitSnapshot)) {
-      const finalValue = postState[label];
-      if (finalValue === undefined) continue;
-      if (finalValue.trim() === originalValue.trim()) continue;
-      if (!finalValue.trim()) continue;
-
-      // User changed this field — save as correction
-      await saveToCache(baseUrl, label, finalValue, 'manual_correction');
-      correctionCount++;
-      console.log(`[AutoFill] Correction saved: "${label}": "${originalValue}" -> "${finalValue}"`);
+  // Many ATS (Ashby, Workday, new Greenhouse) submit via fetch from a button
+  // click, so a `submit` event never fires. Catch clicks on submit-ish buttons.
+  document.addEventListener('click', (e) => {
+    const btn = e.target?.closest?.('button, input[type=submit], [role="button"]');
+    if (!btn) return;
+    const text = `${btn.textContent || ''} ${btn.value || ''}`.toLowerCase();
+    if (/\b(submit|apply|send application|finish|complete application)\b/.test(text)) {
+      saveCorrections(baseUrl);
     }
-
-    if (correctionCount > 0) {
-      console.log(`[AutoFill] Saved ${correctionCount} correction(s) to cache`);
-    }
-    preSubmitSnapshot = null;
   }, { capture: true });
 }
 
 // ── Message listener (from popup) ────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Liveness check used by the side panel to decide whether to inject us
+  if (message.type === 'PING') {
+    sendResponse({ pong: true });
+    return;
+  }
+
   if (message.type === 'EXTRACT_JOB') {
     let data = null;
     try {

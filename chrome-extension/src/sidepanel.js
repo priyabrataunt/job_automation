@@ -9,10 +9,14 @@ const HOST_PARTS_TO_IGNORE = new Set([
   'com', 'io', 'co', 'ai', 'app', 'net', 'org',
 ]);
 
+let msgTimer = null;
 function showMsg(text, isErr = false) {
   $('msg').textContent = isErr ? '' : text;
   $('err').textContent = isErr ? text : '';
-  if (text) setTimeout(() => { $('msg').textContent = ''; $('err').textContent = ''; }, 4000);
+  clearTimeout(msgTimer);
+  if (text) {
+    msgTimer = setTimeout(() => { $('msg').textContent = ''; $('err').textContent = ''; }, isErr ? 8000 : 5000);
+  }
 }
 
 function setDot(color) {
@@ -295,6 +299,30 @@ async function loadAssistedQueue(profile) {
   }
 }
 
+// ── Backend health check ──────────────────────────────────────────────────────
+
+async function checkBackendHealth(profile) {
+  const dot = $('backend-dot');
+  const label = $('backend-label');
+  const baseUrl = getTrackerBaseUrl(profile);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    dot.style.background = '#40a02b';
+    label.textContent = 'Backend';
+    label.title = `Connected to ${baseUrl}`;
+    return true;
+  } catch {
+    dot.style.background = '#d20f39';
+    label.textContent = 'Backend offline';
+    label.title = `Could not reach ${baseUrl} — start it with: cd backend && npm run dev`;
+    return false;
+  }
+}
+
 // ── Load profile from storage ─────────────────────────────────────────────────
 
 async function loadProfile() {
@@ -303,18 +331,60 @@ async function loadProfile() {
   });
 }
 
+// ── Content-script messaging with auto-injection fallback ────────────────────
+// After an extension reload (or on tabs opened before install) the content
+// script is missing and every sendMessage fails. Ping first; if dead, inject
+// the scripts programmatically and retry.
+
+async function pingContentScript(tabId) {
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+    return !!res?.pong;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureContentScript(tabId) {
+  if (await pingContentScript(tabId)) return true;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['src/extractors.js', 'src/content.js'],
+    });
+  } catch {
+    // chrome://, Web Store, PDF viewer, etc. — injection not allowed
+  }
+  await new Promise(r => setTimeout(r, 200));
+  return pingContentScript(tabId);
+}
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+/** Send a message to the active tab's content script, injecting it if needed. */
+async function sendToActiveTab(message) {
+  const tab = await getActiveTab();
+  if (!tab?.id) return { tab: null, response: null };
+  const alive = await ensureContentScript(tab.id);
+  if (!alive) return { tab, response: null };
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, message);
+    return { tab, response };
+  } catch {
+    return { tab, response: null };
+  }
+}
+
 // ── Detect current tab ATS ────────────────────────────────────────────────────
 
 async function detectPage() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return null;
-
-  try {
-    const response = await chrome.tabs.sendMessage(tab.id, { type: 'DETECT' });
-    return { tab, ...response, ok: true };
-  } catch {
-    return { tab, ats: 'Not a job page', inputCount: 0, url: tab.url, ok: false };
-  }
+  const { tab, response } = await sendToActiveTab({ type: 'DETECT' });
+  if (!tab) return null;
+  if (response) return { tab, ...response, ok: true };
+  return { tab, ats: 'Not a job page', inputCount: 0, url: tab.url, ok: false };
 }
 
 // ── Get job info from URL (try to match against job tracker) ──────────────────
@@ -405,6 +475,12 @@ async function markApplied(profile, page, jdState) {
     showMsg('Load your profile.json first (see README).', true);
     return;
   }
+
+  // Backend connectivity indicator (updates while the panel is visible)
+  checkBackendHealth(profile);
+  setInterval(() => {
+    if (document.visibilityState === 'visible') checkBackendHealth(profile);
+  }, 20000);
 
   // Load assisted queue
   loadAssistedQueue(profile);
@@ -546,14 +622,8 @@ async function markApplied(profile, page, jdState) {
 
   // ── Extract job info from current page ──────────────────────────────────────
   async function extractJobFromPage() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) return null;
-      const data = await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_JOB' });
-      return data || null;
-    } catch {
-      return null;
-    }
+    const { response } = await sendToActiveTab({ type: 'EXTRACT_JOB' });
+    return response || null;
   }
 
   async function checkDedup(extracted) {
@@ -706,6 +776,22 @@ async function markApplied(profile, page, jdState) {
     renderDedupBanner(dedupResult);
   }
 
+  // ── Use page description as JD ──────────────────────────────────────────────
+  const jdFromPageLink = $('jd-from-page');
+  if ((extracted.description || '').trim().length > 100) {
+    jdFromPageLink.style.display = 'inline';
+  }
+  jdFromPageLink.addEventListener('click', () => {
+    const desc = (extracted.description || '').trim();
+    if (!desc) { showMsg('No job description detected on this page.', true); return; }
+    jdExpanded = true;
+    $('jd-input-area').style.display = 'block';
+    $('jd-text').value = desc;
+    $('jd-text').dispatchEvent(new Event('input'));
+    $('jd-toggle').textContent = '▲ Hide';
+    showMsg('Job description pulled from page.');
+  });
+
   // ── Save to Tracker button ──────────────────────────────────────────────────
   $('btn-save-tracker').addEventListener('click', async () => {
     if (!extracted) return;
@@ -783,35 +869,46 @@ async function markApplied(profile, page, jdState) {
     await refreshDetection();
     if (!isJobPage) { showMsg('Navigate to a job application page first.', true); return; }
     $('btn-autofill').disabled = true;
-    $('btn-autofill').textContent = 'Phase 1: Filling known fields...';
+    $('btn-autofill').textContent = 'Filling... (AI may take ~10s)';
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      await new Promise(r => setTimeout(r, 50));
-      $('btn-autofill').textContent = 'Filling... (AI may take ~10s)';
-
-      const result = await chrome.tabs.sendMessage(tab.id, { type: 'AUTOFILL', profile, jobDescription: jdText || undefined });
-      const filled = result?.filled?.length || 0;
-      const skipped = result?.skipped?.length || 0;
-      const aiFilled = (result?.filled || []).filter(f => f.includes('(AI)')).length;
-      const profileFilled = filled - aiFilled;
-
-      const summary = $('field-summary');
-      summary.style.display = 'flex';
-      summary.innerHTML = '';
-      (result?.filled || []).slice(0, 15).forEach(f => {
-        const tag = document.createElement('span');
-        tag.className = 'field-tag' + (f.includes('(AI)') ? ' ai' : '');
-        tag.textContent = f;
-        summary.appendChild(tag);
+      const { tab, response: result } = await sendToActiveTab({
+        type: 'AUTOFILL',
+        profile,
+        jobDescription: jdText || undefined,
       });
-
-      if (result?.aiError) {
-        showMsg(`Profile: ${profileFilled} filled | AI error: ${result.aiError.slice(0, 50)}`, true);
-      } else if (aiFilled > 0) {
-        showMsg(`Profile: ${profileFilled} filled | AI: ${aiFilled} filled | ${skipped} skipped`);
+      if (!tab) throw new Error('No active tab found.');
+      if (!result) throw new Error('Could not reach this page — try reloading the tab.');
+      if (result.skippedDueToEdit) {
+        showMsg('Skipped — you were editing a field. Click elsewhere and retry.', true);
       } else {
-        showMsg(`Filled ${filled} fields, ${skipped} skipped`);
+        const filledList = result.filled || [];
+        const skippedList = result.skipped || [];
+        const aiFilled = filledList.filter(f => f.includes('(AI)')).length;
+        const cacheFilled = filledList.filter(f => f.includes('(cached)')).length;
+        const profileFilled = filledList.length - aiFilled - cacheFilled;
+
+        const summary = $('field-summary');
+        summary.style.display = 'flex';
+        summary.innerHTML = '';
+        filledList.slice(0, 15).forEach(f => {
+          const tag = document.createElement('span');
+          tag.className = 'field-tag' + (f.includes('(AI)') ? ' ai' : f.includes('(cached)') ? ' cached' : '');
+          tag.textContent = f;
+          summary.appendChild(tag);
+        });
+        skippedList.slice(0, Math.max(0, 15 - Math.min(filledList.length, 15))).forEach(f => {
+          const tag = document.createElement('span');
+          tag.className = 'field-tag skip';
+          tag.textContent = `✕ ${f}`;
+          tag.title = 'Not filled — answer manually or use the AI button beside the field';
+          summary.appendChild(tag);
+        });
+
+        if (result.aiError) {
+          showMsg(`Filled ${filledList.length} (profile ${profileFilled}, cache ${cacheFilled}) | AI error: ${result.aiError.slice(0, 60)}`, true);
+        } else {
+          showMsg(`Filled ${filledList.length} (profile ${profileFilled}, cache ${cacheFilled}, AI ${aiFilled}) | ${skippedList.length} skipped`);
+        }
       }
     } catch (e) {
       showMsg(e.message || 'Fill failed', true);
